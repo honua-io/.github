@@ -20,7 +20,14 @@ on:
         required: false
         default: true
 
-permissions: read-all
+# Explicit minimal scopes. A reusable workflow must not request more than the caller
+# grants — `read-all` requests read on every scope, which exceeds a restricted caller
+# and causes a startup_failure.
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+  actions: read
 
 jobs:
   scorecard:

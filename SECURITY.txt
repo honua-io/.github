@@ -1,0 +1,13 @@
+# Canonical home for security.txt content (RFC 9116).
+#
+# This MUST be served at https://honua.io/.well-known/security.txt (and ideally
+# https://honua.io/security.txt) to be valid — a file in this repo is not discoverable
+# by scanners. Action: publish this content from the honua-site repo at that path.
+#
+# Update `Expires` to a date < 1 year out and refresh before it lapses.
+
+Contact: mailto:security@honua.io
+Expires: 2027-06-08T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://honua.io/.well-known/security.txt
+Policy: https://github.com/honua-io/.github/blob/main/SECURITY.md

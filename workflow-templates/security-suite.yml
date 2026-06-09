@@ -1,0 +1,34 @@
+# Example caller — copy into a repo as .github/workflows/security.yml and trim to fit.
+# Wires the org reusable security workflows. Adjust `languages` and IaC/image bits per repo.
+name: Security
+
+on:
+  push:
+    branches: [ "main", "trunk" ]
+  pull_request:
+    branches: [ "main", "trunk" ]
+  schedule:
+    - cron: '0 6 * * 1'   # weekly, for Scorecard + fresh vuln DB
+
+permissions: read-all
+
+jobs:
+  codeql:
+    uses: honua-io/.github/.github/workflows/reusable-codeql.yml@main
+    with:
+      # .NET repo example; for SDKs use ["javascript-typescript"] / ["python"]
+      languages: '["csharp"]'
+
+  trivy:
+    uses: honua-io/.github/.github/workflows/reusable-trivy.yml@main
+    with:
+      scan-type: fs
+
+  scorecard:
+    # Public repos only; gives the README badge.
+    uses: honua-io/.github/.github/workflows/reusable-scorecard.yml@main
+
+  # IaC repos (honua-terraform / honua-helm) add:
+  # iac:
+  #   uses: honua-io/.github/.github/workflows/reusable-iac-scan.yml@main
+  #   with: { directory: ".", framework: "terraform,helm" }

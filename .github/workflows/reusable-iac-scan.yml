@@ -1,0 +1,50 @@
+# Reusable Infrastructure-as-Code scan (Checkov) for terraform/helm/dockerfile/k8s.
+# Use in honua-terraform and honua-helm. Results upload as SARIF.
+name: Reusable IaC Scan
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: 'Directory to scan'
+        type: string
+        required: false
+        default: '.'
+      framework:
+        description: 'Checkov frameworks to run (e.g. terraform,helm,dockerfile,kubernetes)'
+        type: string
+        required: false
+        default: 'all'
+      soft-fail:
+        description: 'If true, do not fail the build on findings (report only)'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  checkov:
+    name: Checkov
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ inputs.directory }}
+          framework: ${{ inputs.framework }}
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+          soft_fail: ${{ inputs.soft-fail }}
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+          category: checkov

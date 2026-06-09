@@ -1,0 +1,6 @@
+{
+  "name": "Honua Security Suite",
+  "description": "CodeQL + Trivy + OpenSSF Scorecard via honua-io reusable workflows.",
+  "iconName": "shield",
+  "categories": ["Security"]
+}

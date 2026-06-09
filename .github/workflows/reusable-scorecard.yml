@@ -1,0 +1,51 @@
+# Reusable OpenSSF Scorecard workflow. Publishes results to the repo's code-scanning tab
+# and (for public repos) the public Scorecard API, enabling a README badge.
+#
+# Caller example (run on default-branch push + weekly):
+#   on:
+#     branch_protection_rule:
+#     schedule: [{ cron: '0 6 * * 1' }]
+#     push: { branches: [ "main", "trunk" ] }
+#   jobs:
+#     scorecard:
+#       uses: honua-io/.github/.github/workflows/reusable-scorecard.yml@main
+name: Reusable Scorecard
+
+on:
+  workflow_call:
+    inputs:
+      publish-results:
+        description: 'Publish to the public OpenSSF API (required for the badge; public repos only)'
+        type: boolean
+        required: false
+        default: true
+
+permissions: read-all
+
+jobs:
+  scorecard:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload SARIF
+      id-token: write          # publish results to OpenSSF
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: ${{ inputs.publish-results }}
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: scorecard

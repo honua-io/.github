@@ -45,8 +45,8 @@ Everything here is pre-1.0 and under active development.
 |---|---|
 | [honua-esri-assess](https://github.com/honua-io/honua-esri-assess) | Esri footprint assessment CLI for migration discovery |
 
-Licensing varies by repo: honua-server and honua-collect are Elastic License 2.0 open core;
-most other repos are Apache-2.0 — see each repo's LICENSE.
+Licensing varies by repository: `honua-server` and `honua-collect` use the Elastic License 2.0 (ELv2);
+all other repositories listed here use the Apache License 2.0.
 
 ## Security
 

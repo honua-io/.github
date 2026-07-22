@@ -30,7 +30,6 @@ Everything here is pre-1.0 and under active development.
 | [honua-sdk-dotnet](https://github.com/honua-io/honua-sdk-dotnet) | .NET SDKs |
 | [honua-mobile](https://github.com/honua-io/honua-mobile) | .NET MAUI mobile SDK, GeoPackage offline foundation |
 | [honua-collect](https://github.com/honua-io/honua-collect) | Offline-first mobile field data collection app |
-| [honua-qgis-plugin](https://github.com/honua-io/honua-qgis-plugin) | QGIS plugin |
 
 ### Open standards & benchmarks (vendor-neutral)
 
@@ -45,11 +44,10 @@ Everything here is pre-1.0 and under active development.
 | Repo | What it is |
 |---|---|
 | [honua-esri-assess](https://github.com/honua-io/honua-esri-assess) | Esri footprint assessment CLI for migration discovery |
-| [honua-gis-llm](https://github.com/honua-io/honua-gis-llm) | Open-weights GIS-specific model evaluation, training, and distribution |
 | [honua-site](https://github.com/honua-io/honua-site) | Source for [honua.io](https://honua.io) |
 
 Licensing varies by repo: honua-server and honua-collect are Elastic License 2.0 open core;
-most other repos are Apache-2.0 (the QGIS plugin is GPL-2.0) — see each repo's LICENSE.
+most other repos are Apache-2.0 — see each repo's LICENSE.
 
 ## Security
 

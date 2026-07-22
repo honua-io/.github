@@ -1,15 +1,14 @@
 # Honua
 
-Honua is a cloud-native, AI-ready geospatial platform. Its flagship, [honua-server](https://github.com/honua-io/honua-server),
-exposes one shared geospatial capability set through many protocol adapters — GeoServices REST
-(FeatureServer / MapServer / ImageServer / Geometry / GPServer), OGC API (Features / Maps / Tiles / Processes),
-classic OGC WMS/WFS/WMTS/WCS, STAC, OData v4, vector tiles (MVT/TileJSON), Terrain-RGB, MCP, and
-gRPC — backed by PostGIS. Because it speaks GeoServices natively, ArcGIS Pro and Esri SDK clients
-connect unmodified, making Esri migration and coexistence a first-class path.
+Honua is a cloud-native, AI-ready geospatial platform for teams modernizing GIS infrastructure without a
+big-bang rewrite. Its flagship, [honua-server](https://github.com/honua-io/honua-server), connects existing
+GIS clients and AI agents to the same PostGIS-backed data through GeoServices REST, OGC APIs, OData,
+STAC, tiles, gRPC, and MCP. Supported ArcGIS Pro and Esri SDK workflows connect without application
+rewrites, making migration and coexistence a first-class path.
 
-📖 [Documentation](https://honua.gitbook.io/honuaio/) · 🌐 [honua.io](https://honua.io)
+🚀 [Quickstart](https://github.com/honua-io/honua-server#quick-start) · 📖 [Documentation](https://honua.gitbook.io/honuaio/) · ✅ [Proof](https://honua.io/claims.html) · 🌐 [honua.io](https://honua.io)
 
-Everything here is pre-1.0 and under active development.
+Honua Server is currently pre-1.0 and under active development.
 
 ## Repositories
 
@@ -39,7 +38,7 @@ Everything here is pre-1.0 and under active development.
 | [geospatial-mcp](https://github.com/honua-io/geospatial-mcp) | Open geospatial MCP standard |
 | [geobench](https://github.com/honua-io/geobench) | Open benchmark suite for geospatial servers |
 
-### Tools & more
+### Migration tools
 
 | Repo | What it is |
 |---|---|
@@ -53,5 +52,5 @@ all other repositories listed here use the Apache License 2.0.
 We welcome security research. See our [Security Policy](https://github.com/honua-io/.github/blob/main/SECURITY.md)
 and report vulnerabilities to **security@honua.io**.
 
-Our security posture, certifications, and self-attestations are published on our
-trust center (see [honua.io](https://honua.io)).
+Our security posture, standards work, and self-attestations are published on our
+[security page](https://honua.io/security.html).

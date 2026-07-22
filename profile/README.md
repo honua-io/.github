@@ -1,6 +1,6 @@
 # Honua
 
-Honua is a cloud-native geospatial platform. Its flagship, [honua-server](https://github.com/honua-io/honua-server),
+Honua is a cloud-native, AI-ready geospatial platform. Its flagship, [honua-server](https://github.com/honua-io/honua-server),
 exposes one shared geospatial capability set through many protocol adapters — GeoServices REST
 (FeatureServer / MapServer / ImageServer / Geometry / GPServer), OGC API (Features / Maps / Tiles / Processes),
 classic OGC WMS/WFS/WMTS/WCS, STAC, OData v4, vector tiles (MVT/TileJSON), Terrain-RGB, MCP, and

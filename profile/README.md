@@ -26,7 +26,7 @@ Honua Server is currently pre-1.0 and under active development.
 | Repo | What it is |
 |---|---|
 | [honua-sdk-js](https://github.com/honua-io/honua-sdk-js) | Typed multi-protocol clients with MapLibre, Cesium, and kepler.gl integrations, ArcGIS compatibility, and an MCP server |
-| [honua-sdk-python](https://github.com/honua-io/honua-sdk-python) | Typed data and admin clients with GeoPandas, raster, gRPC, and ArcPy migration tooling |
+| [honua-sdk-python](https://github.com/honua-io/honua-sdk-python) | Geoprocessing-focused SDK for ArcPy migration, GeoPandas/raster workflows, and typed data/admin access |
 | [honua-sdk-dotnet](https://github.com/honua-io/honua-sdk-dotnet) | DI-ready protocol and admin clients with geometry and offline sync |
 | [honua-mobile](https://github.com/honua-io/honua-mobile) | .NET MAUI SDK for offline field collection, GeoPackage storage, dynamic forms, and background sync |
 | [honua-collect](https://github.com/honua-io/honua-collect) | Offline-first mobile field data collection app |

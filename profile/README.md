@@ -4,7 +4,8 @@ Honua is a cloud-native, AI-ready geospatial platform for teams modernizing GIS 
 big-bang rewrite. Its flagship, [honua-server](https://github.com/honua-io/honua-server), connects existing
 GIS clients and AI agents to the same PostGIS-backed data through GeoServices REST, OGC APIs, OData,
 STAC, tiles, gRPC, and MCP. Supported ArcGIS Pro and Esri SDK workflows connect without application
-rewrites, making migration and coexistence a first-class path.
+rewrites, making migration and coexistence a first-class path. Import existing ArcGIS services into PostGIS,
+migrate GeoServer catalogs, and move supported workflows service by service.
 
 🚀 [Quickstart](https://github.com/honua-io/honua-server#quick-start) · 📖 [Documentation](https://honua.gitbook.io/honuaio/) · ✅ [Proof](https://honua.io/claims.html) · 🌐 [honua.io](https://honua.io)
 
@@ -40,9 +41,13 @@ Honua Server is currently pre-1.0 and under active development.
 
 ### Migration tools
 
-| Repo | What it is |
+| Tool | What it does |
 |---|---|
 | [honua-esri-assess](https://github.com/honua-io/honua-esri-assess) | Esri footprint assessment CLI for migration discovery |
+| [honua-migrate for JavaScript](https://github.com/honua-io/honua-sdk-js/blob/trunk/docs/migration-honua-maplibre.md) | Scan ArcGIS JavaScript applications and apply safe Honua/MapLibre codemods |
+| [honua-migrate for Python](https://github.com/honua-io/honua-sdk-python/blob/trunk/docs/honua-gp/codemod-translation-coverage.md) | Scan and translate ArcPy scripts; classify Python and ModelBuilder toolboxes |
+| [ArcGIS service import](https://github.com/honua-io/honua-server/blob/trunk/docs/guides/publish/import-from-arcgis-services.md) | Discover ArcGIS Server or ArcGIS Online services, copy features into PostGIS, and publish Honua layers |
+| [GeoServer migration](https://github.com/honua-io/honua-server/blob/trunk/docs/guides/migrate/from-geoserver.md) | Scan catalogs, dry-run and apply supported metadata and styles, then repoint WMS/WFS clients |
 
 Licensing varies by repository: `honua-server` and `honua-collect` use the Elastic License 2.0 (ELv2);
 all other repositories listed here use the Apache License 2.0.

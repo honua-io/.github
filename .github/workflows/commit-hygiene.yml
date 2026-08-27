@@ -46,13 +46,15 @@ jobs:
           expected_name = "Mike McDougall"
           expected_email = "mike@honua.io"
           commits_url = os.environ.get("COMMITS_URL", "")
+          default_bot_committers = '["web-flow","dependabot[bot]"]'
 
           if not commits_url:
               print("::error::Commit hygiene requires a pull_request event with commits_url.")
               raise SystemExit(1)
 
           try:
-              allowlist_value = json.loads(os.environ["BOT_COMMITTER_ALLOWLIST"])
+              allowlist_json = os.environ.get("BOT_COMMITTER_ALLOWLIST") or default_bot_committers
+              allowlist_value = json.loads(allowlist_json)
               if not isinstance(allowlist_value, list) or not all(
                   isinstance(login, str) and login for login in allowlist_value
               ):

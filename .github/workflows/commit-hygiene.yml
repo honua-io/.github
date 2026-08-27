@@ -1,0 +1,153 @@
+# Reusable PR commit-hygiene check for honua-io repositories.
+#
+# The default bot-committer allowlist is deliberately narrow:
+# - web-flow signs/records commits created through GitHub's web UI.
+# - dependabot[bot] records commits created by GitHub's dependency automation.
+#
+# These exceptions apply only to the committer. Every commit author must still be
+# Mike McDougall <mike@honua.io>. Callers may replace (not extend) the JSON list.
+name: Commit hygiene
+
+on:
+  workflow_call:
+    inputs:
+      bot-committer-allowlist:
+        description: >-
+          JSON array of trusted GitHub bot logins allowed as committers. Defaults
+          exactly to web-flow (GitHub UI commits) and dependabot[bot] (dependency
+          automation); authors must always match the owner identity.
+        type: string
+        required: false
+        default: '["web-flow","dependabot[bot]"]'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check every PR commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate commit authorship and attribution
+        env:
+          COMMITS_URL: ${{ github.event.pull_request.commits_url }}
+          GH_TOKEN: ${{ github.token }}
+          BOT_COMMITTER_ALLOWLIST: ${{ inputs.bot-committer-allowlist }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.parse
+          import urllib.request
+
+          expected_name = "Mike McDougall"
+          expected_email = "mike@honua.io"
+          commits_url = os.environ.get("COMMITS_URL", "")
+
+          if not commits_url:
+              print("::error::Commit hygiene requires a pull_request event with commits_url.")
+              raise SystemExit(1)
+
+          try:
+              allowlist_value = json.loads(os.environ["BOT_COMMITTER_ALLOWLIST"])
+              if not isinstance(allowlist_value, list) or not all(
+                  isinstance(login, str) and login for login in allowlist_value
+              ):
+                  raise ValueError("expected a JSON array of non-empty strings")
+              bot_committers = set(allowlist_value)
+          except (KeyError, json.JSONDecodeError, ValueError) as error:
+              print(f"::error::Invalid bot-committer-allowlist: {error}")
+              raise SystemExit(1)
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          commits = []
+          page = 1
+          while True:
+              separator = "&" if urllib.parse.urlparse(commits_url).query else "?"
+              url = f"{commits_url}{separator}per_page=100&page={page}"
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  batch = json.load(response)
+              if not isinstance(batch, list):
+                  print("::error::GitHub commits API returned an unexpected response.")
+                  raise SystemExit(1)
+              commits.extend(batch)
+              if len(batch) < 100:
+                  break
+              page += 1
+
+          attribution_patterns = (
+              (re.compile(r"(?im)^\s*co-authored-by\s*:"), "Co-Authored-By trailer"),
+              (re.compile(r"(?i)generated\s+with"), "Generated with attribution"),
+              (re.compile("\N{ROBOT FACE}"), "robot emoji attribution"),
+          )
+
+          def identity(person):
+              return person.get("name") or "", person.get("email") or ""
+
+          def display(person):
+              name, email = identity(person)
+              return f"{name or '<missing>'} <{email or '<missing>'}>"
+
+          def table_cell(value):
+              return value.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+          offenders = []
+          for item in commits:
+              commit = item.get("commit") or {}
+              author = commit.get("author") or {}
+              committer = commit.get("committer") or {}
+              violations = []
+
+              if identity(author) != (expected_name, expected_email):
+                  violations.append("author identity")
+
+              api_committer = item.get("committer") or {}
+              committer_login = api_committer.get("login")
+              committer_is_allowed_bot = committer_login in bot_committers
+              if identity(committer) != (expected_name, expected_email) and not committer_is_allowed_bot:
+                  violations.append("committer identity")
+
+              message = commit.get("message") or ""
+              for pattern, label in attribution_patterns:
+                  if pattern.search(message):
+                      violations.append(label)
+
+              if violations:
+                  offenders.append(
+                      (
+                          (item.get("sha") or "<missing>")[:12],
+                          display(author),
+                          display(committer),
+                          ", ".join(violations),
+                      )
+                  )
+
+          if offenders:
+              lines = [
+                  "| Commit | Author | Committer | Violations |",
+                  "| --- | --- | --- | --- |",
+              ]
+              for sha, author, committer, violations in offenders:
+                  lines.append(
+                      f"| `{table_cell(sha)}` | `{table_cell(author)}` | "
+                      f"`{table_cell(committer)}` | {table_cell(violations)} |"
+                  )
+              table = "\n".join(lines)
+              print(table)
+              summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as summary:
+                      summary.write("## Commit hygiene violations\n\n")
+                      summary.write(table + "\n")
+              print(f"::error::{len(offenders)} of {len(commits)} commits violate commit hygiene.")
+              raise SystemExit(1)
+
+          print(f"Commit hygiene passed: all {len(commits)} commits are compliant.")
+          PY

@@ -9,6 +9,7 @@
 name: Commit hygiene
 
 on:
+  pull_request:
   workflow_call:
     inputs:
       bot-committer-allowlist:

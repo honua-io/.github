@@ -32,6 +32,7 @@ jobs:
       - name: Validate commit authorship and attribution
         env:
           COMMITS_URL: ${{ github.event.pull_request.commits_url }}
+          COMMIT_COUNT: ${{ github.event.pull_request.commits }}
           GH_TOKEN: ${{ github.token }}
           BOT_COMMITTER_ALLOWLIST: ${{ inputs.bot-committer-allowlist }}
         run: |
@@ -69,6 +70,15 @@ jobs:
               "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
               "X-GitHub-Api-Version": "2022-11-28",
           }
+          # The list-commits endpoint returns at most 250 commits no matter how it
+          # is paginated; beyond that a short page would falsely read as complete.
+          # Fail closed instead of certifying commits we cannot see.
+          declared = int(os.environ.get("COMMIT_COUNT", "0") or 0)
+          if declared > 250:
+              print(f"::error::PR declares {declared} commits; the commits API caps at 250, "
+                    "so hygiene cannot be verified. Split the PR or verify manually.")
+              raise SystemExit(1)
+
           commits = []
           page = 1
           while True:

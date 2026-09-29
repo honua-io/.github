@@ -28,8 +28,8 @@ Honua Server is currently pre-1.0 and under active development.
 | [honua-sdk-js](https://github.com/honua-io/honua-sdk-js) | Typed multi-protocol clients with MapLibre, Cesium, and kepler.gl integrations, ArcGIS compatibility, and an MCP server |
 | [honua-sdk-python](https://github.com/honua-io/honua-sdk-python) | Geoprocessing-focused SDK for ArcPy migration, GeoPandas/raster workflows, and typed data/admin access |
 | [honua-sdk-dotnet](https://github.com/honua-io/honua-sdk-dotnet) | DI-ready protocol and admin clients with geometry and offline sync |
-| [honua-mobile](https://github.com/honua-io/honua-mobile) | Reusable .NET MAUI SDK and component foundation for transport, GeoPackage sync, field workflows, maps, and device integration |
-| [honua-collect](https://github.com/honua-io/honua-collect) | End-user offline-first field collection app built on `honua-mobile`, with smart forms, encrypted storage, sync, GPS/media capture, and export |
+| [honua-mobile](https://github.com/honua-io/honua-mobile) | **Experimental:** Reusable .NET MAUI SDK and component foundation for transport, GeoPackage sync, field workflows, maps, and device integration |
+| [honua-collect](https://github.com/honua-io/honua-collect) | **Experimental:** End-user offline-first field collection app built on `honua-mobile`, with smart forms, encrypted storage, sync, GPS/media capture, and export |
 
 ### Open standards & benchmarks (vendor-neutral)
 

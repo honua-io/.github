@@ -9,6 +9,10 @@ on:
         description: Newline-separated globs of extra paths to skip. Generated and vendored paths are skipped already.
         type: string
         default: ""
+      frozen:
+        description: Newline-separated globs of files that may not be added or grow (e.g. shims awaiting a migration).
+        type: string
+        default: ""
       xml-docs:
         description: "forbid (application code) or public-summary (published SDKs: one-line <summary> on public members)."
         type: string
@@ -44,9 +48,11 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           EXCLUDES: ${{ inputs.exclude }}
           XML_DOCS: ${{ inputs.xml-docs }}
+          FROZEN: ${{ inputs.frozen }}
         run: |
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-          excludes=()
-          while IFS= read -r glob; do [ -n "$glob" ] && excludes+=(--exclude "$glob"); done <<< "$EXCLUDES"
+          path_options=()
+          while IFS= read -r glob; do [ -n "$glob" ] && path_options+=(--exclude "$glob"); done <<< "$EXCLUDES"
+          while IFS= read -r glob; do [ -n "$glob" ] && path_options+=(--frozen "$glob"); done <<< "$FROZEN"
           python3 -I .clean-code-tool/clean-code/check_clean_code.py --base HEAD^1 --head HEAD \
-            --pr-body "$RUNNER_TEMP/pr-body.md" --xml-docs "$XML_DOCS" "${excludes[@]}"
+            --pr-body "$RUNNER_TEMP/pr-body.md" --xml-docs "$XML_DOCS" "${path_options[@]}"

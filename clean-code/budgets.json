@@ -1,8 +1,10 @@
 {
   "functionLines": 60,
+  "functionGrowthLines": 10,
   "parameters": 4,
   "newFileLines": 400,
   "largeFileLines": 800,
+  "largeFileGrowthLines": 50,
   "duplicateLines": 15,
   "duplicateTokens": 100,
   "complexity": 10,

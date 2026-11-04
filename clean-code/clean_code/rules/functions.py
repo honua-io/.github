@@ -58,9 +58,12 @@ def _file_findings(change: FileChange, functions: list[Function], pairs: dict[Fu
 
 
 def _length_findings(touched: _FunctionChange) -> Iterator[Finding]:
-    length = touched.head.length
-    if length > BUDGETS.function_lines and length > touched.base_length:
-        grew = f"grew from {touched.base_length} to" if touched.base else "is"
+    """Newly over the budget, or over it already and grown by the growth budget or more."""
+    length, base_length = touched.head.length, touched.base_length
+    newly_over = length > BUDGETS.function_lines >= base_length
+    grew_while_over = base_length > BUDGETS.function_lines and length - base_length >= BUDGETS.function_growth_lines
+    if newly_over or grew_while_over:
+        grew = f"grew from {base_length} to" if touched.base else "is"
         message = f"{touched.head.name} {grew} {length} lines; extract steps"
         yield Finding.of("clean-code/function-length", touched.location, message)
 

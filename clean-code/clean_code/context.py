@@ -18,6 +18,7 @@ class XmlDocPolicy(Enum):
 class CheckOptions:
     excludes: tuple[str, ...] = ()
     xml_docs: XmlDocPolicy = XmlDocPolicy.FORBID
+    frozen: tuple[str, ...] = ()
 
 
 class CheckContext:

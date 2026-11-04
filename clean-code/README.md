@@ -4,7 +4,7 @@ Shared Clean Code tooling for honua-io repositories. The review rubric every rep
 
 ## PR check
 
-`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It is a ratchet: it reports only what the PR makes worse, so existing code never fails it. Comment rules judge added lines. Everything else compares head with base. Each unchanged head line maps to the base line it came from. Functions are paired one to one (`clean_code/correspondence.py`): first by the unchanged lines each owns directly (not through a nested function), then by a unique same name, then by similar text. So renames, reorders, overloads and edits elsewhere in the file keep their baseline, and when a function is split only one half continues it. A touched function may not exceed a budget by more than its base counterpart did, nor gain a boolean parameter; a function without a counterpart is new. ruff and ESLint run on base and head copies of the changed files: a function-level finding (parameters, statements, complexity) is new unless the counterpart had it with at least the same measure, and a line-level finding is new unless its unchanged base line had it. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
+`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It is a ratchet: it reports only what the PR makes worse, so existing code never fails it. Comment rules judge added lines. Everything else compares head with base. Each unchanged head line maps to the base line it came from. Functions are paired one to one (`clean_code/correspondence.py`): first by the unchanged lines each owns directly (not through a nested function), then by a unique same name, then by similar text. So renames, reorders, overloads and edits elsewhere in the file keep their baseline, and when a function is split only one half continues it. A touched function may not newly pass the length budget or grow by 10+ lines while over it, may not newly exceed the parameter budget, and may not gain a boolean parameter; a function without a counterpart is new. ruff and ESLint run on base and head copies of the changed files: a function-level finding (parameters, statements, complexity) is new unless the counterpart had it with at least the same measure, and a line-level finding is new unless its unchanged base line had it. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
 
 ```yaml
 # .github/workflows/clean-code.yml in a calling repository
@@ -19,6 +19,8 @@ jobs:
     uses: honua-io/.github/.github/workflows/clean-code.yml@<sha>
     with:
       xml-docs: forbid        # or public-summary for published SDKs
+      frozen: |               # optional, files that may not be added or grow
+        **/*Shims.cs
       exclude: |              # optional, extra globs to skip
         docs/examples/**
 ```
@@ -37,7 +39,7 @@ jobs:
 | C5 | `clean-code/commented-out-code` | Commented-out code | C#, Terraform, shell | block |
 | C5 | `eslint/sonarjs/no-commented-code` | Commented-out code | TS/JS | block |
 | C5 | `ruff/ERA001` | Commented-out code | Python | block |
-| Ch10 | `clean-code/large-file-growth` | File over 800 lines grew | all source | block |
+| Ch10 | `clean-code/large-file-growth` | File over 800 lines grew by 50+ lines | all source | block |
 | Ch10 | `clean-code/new-file-size` | New file over 400 lines | all source | block |
 | F1 | `clean-code/too-many-parameters` | More than 4 parameters | C# | block |
 | F1 | `eslint/max-params` | More than 4 parameters | TS/JS | block |
@@ -47,13 +49,14 @@ jobs:
 | G25 | `eslint/no-magic-numbers` | Magic number | TS/JS | advisory |
 | G25 | `eslint/sonarjs/no-duplicate-string` | Duplicated string literal | TS/JS | advisory |
 | G25 | `ruff/PLR2004` | Magic number | Python | advisory |
-| G30 | `clean-code/function-length` | Function over 60 lines | Python, C#, TS/JS | block |
+| G30 | `clean-code/function-length` | Function newly over 60 lines, or grew by 10+ while over | Python, C#, TS/JS | block |
 | G30 | `eslint/complexity` | Cyclomatic complexity over 10 | TS/JS | advisory |
 | G30 | `eslint/sonarjs/cognitive-complexity` | Cognitive complexity over 15 | TS/JS | advisory |
 | G30 | `ruff/C901` | Cyclomatic complexity over 10 | Python | advisory |
 | G30 | `ruff/PLR0915` | Too many statements | Python | advisory |
 | G34 | `eslint/max-depth` | Nesting deeper than 2 | TS/JS | advisory |
 | G5 | `clean-code/duplication` | Duplicated block (15+ lines, 100+ tokens) | all source | block |
+| G5 | `clean-code/frozen-file` | Frozen file added or grown | all source | block |
 | G5 | `eslint/sonarjs/no-identical-functions` | Identical functions | TS/JS | block |
 
 `block` findings fail the job; `advisory` findings are notices. One tool owns each rule per language: ruff for Python, ESLint with `eslint-plugin-sonarjs` for TS/JS, and the lexers in `clean_code/` for C#, Terraform, shell and the cross-language rules. Function length for TS/JS comes from the TypeScript parser rather than ESLint, so `describe`/`it` callbacks don't count as long functions. C# has no compiler-backed analyzer here; that would need a build, and this check runs on changed files only.
@@ -64,10 +67,10 @@ jobs:
 
 | Budget | Value | Rule |
 | --- | --- | --- |
-| Function length | 60 lines (the rubric's soft target is about 40) | G30 |
+| Function length | blocks a function that newly passes 60 lines, or one already over 60 that grows by 10 or more (the rubric's soft target is about 40) | G30 |
 | Parameters | 4 (constructors exempt in C#, for dependency injection) | F1 |
 | New file | 400 lines | Ch10 |
-| Large file that may not grow | 800 lines | Ch10 |
+| Large file | a file over 800 lines may not grow by 50 or more lines; shrinking or splitting it passes | Ch10 |
 | Duplicated block | 15 consecutive significant lines and 100 tokens | G5 |
 | Cyclomatic / cognitive complexity | 10 / 15 | G30 |
 | Nesting depth | 2 | G34 |

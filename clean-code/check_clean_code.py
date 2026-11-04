@@ -23,6 +23,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="repository root")
     parser.add_argument("--pr-body", type=Path, help="file holding the PR description")
     parser.add_argument("--exclude", action="append", default=[], help="extra glob of paths to skip")
+    parser.add_argument("--frozen", action="append", default=[], help="glob of files that may not be added or grow")
     parser.add_argument("--xml-docs", choices=[policy.value for policy in XmlDocPolicy], default="forbid")
     parser.add_argument("--json", type=Path, help="also write the findings as JSON here")
     return parser.parse_args(argv)
@@ -30,7 +31,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     arguments = parse_arguments(argv)
-    options = CheckOptions(tuple(arguments.exclude), XmlDocPolicy(arguments.xml_docs))
+    options = CheckOptions(tuple(arguments.exclude), XmlDocPolicy(arguments.xml_docs), tuple(arguments.frozen))
     context = CheckContext(Repository(arguments.repo), Revisions(arguments.base, arguments.head), options)
     pr_body = arguments.pr_body.read_text() if arguments.pr_body else ""
     report = Report(run_checks(context), quality_exceptions(pr_body), context.unchecked)

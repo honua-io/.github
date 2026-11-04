@@ -119,9 +119,19 @@ class SizesAndDuplication(unittest.TestCase):
         self.assertNotIn("clean-code/new-file-size", self.keys({"src/ok.py": numbered_lines(400, "a_{0} = {0}")}))
         self.assertIn("clean-code/new-file-size", self.keys({"src/new.py": numbered_lines(401, "b_{0} = {0}")}))
 
-    def test_large_file_may_shrink_but_not_grow(self):
-        self.assertIn("clean-code/large-file-growth", self.keys({"src/big.py": self.existing + "extra = 1\n"}))
+    def test_large_file_may_not_grow_by_the_growth_budget(self):
+        self.assertIn("clean-code/large-file-growth", self.keys({"src/big.py": self.existing + numbered_lines(50, "extra_{0} = {0}")}))
+        self.assertNotIn("clean-code/large-file-growth", self.keys({"src/big.py": self.existing + numbered_lines(49, "extra_{0} = {0}")}))
         self.assertNotIn("clean-code/large-file-growth", self.keys({"src/big.py": self.existing[: -40]}))
+
+    def test_frozen_files_may_not_be_added_or_grow(self):
+        shims = "class AShims\n{\n}\n"
+        pull_request = PullRequest({"src/OldShims.cs": shims})
+        self.addCleanup(pull_request.close)
+        options = CheckOptions(frozen=("**/*Shims.cs",))
+        grown = rule_keys(pull_request.findings({"src/OldShims.cs": shims + "// more\n", "src/NewShims.cs": shims}, options))
+        shrunk = rule_keys(pull_request.findings({"src/OldShims.cs": "class AShims\n{}\n"}, options))
+        self.assertEqual(("clean-code/frozen-file" in grown, "clean-code/frozen-file" in shrunk), (True, False))
 
     def test_copied_block_is_duplication_and_new_code_is_not(self):
         copied = "".join(self.existing.splitlines(keepends=True)[100:120])

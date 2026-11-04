@@ -11,9 +11,11 @@ class Budgets:
     """Thresholds shared with eslint.config.mjs, which reads the same budgets.json."""
 
     function_lines: int
+    function_growth_lines: int
     parameters: int
     new_file_lines: int
     large_file_lines: int
+    large_file_growth_lines: int
     duplicate_lines: int
     duplicate_tokens: int
     complexity: int

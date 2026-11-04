@@ -27,8 +27,9 @@ class FunctionRatchet(unittest.TestCase):
         edited = python_function("legacy", 98).replace("step_3()", "step_three()")
         self.assertNotIn("clean-code/function-length", self.keys({"src/legacy.py": edited}))
 
-    def test_growing_an_oversized_function_is_flagged(self):
-        self.assertIn("clean-code/function-length", self.keys({"src/legacy.py": python_function("legacy", 99)}))
+    def test_an_oversized_function_may_grow_a_little_but_not_by_the_growth_budget(self):
+        self.assertNotIn("clean-code/function-length", self.keys({"src/legacy.py": python_function("legacy", 107)}))
+        self.assertIn("clean-code/function-length", self.keys({"src/legacy.py": python_function("legacy", 108)}))
 
     def test_existing_tool_findings_are_not_reported_again(self):
         edited = "def wide(a, b, c, d, e):\n    return b\n"

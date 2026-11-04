@@ -18,7 +18,7 @@ def lex_python(text: str) -> Lexed:
         tree = ast.parse(text)
     except (tokenize.TokenError, SyntaxError) as error:
         raise LexError(f"Python does not parse: {error}") from error
-    docstrings = _docstring_spans(tree, text.splitlines(keepends=True))
+    docstrings = _docstring_spans(tree, text.split("\n"))
     lexed = Lexed(PYTHON_GAPS, functions=_functions(tree))
     for raw in raw_tokens:
         _add_token(lexed, raw, docstrings)
@@ -53,7 +53,7 @@ def _docstring_spans(tree: ast.Module, lines: list[str]) -> list[tuple[Position,
 
 
 def _character_column(lines: list[str], row: int, byte_offset: int) -> int:
-    """ast columns count UTF-8 bytes; tokenize columns count characters."""
+    """ast columns count UTF-8 bytes; tokenize columns count characters. Rows end only at LF, as both see them."""
     return len(lines[row - 1].encode("utf-8")[:byte_offset].decode("utf-8"))
 
 

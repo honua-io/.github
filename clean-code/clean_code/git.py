@@ -3,9 +3,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+from .line_map import Hunk, LineMap
+
 UNSAFE_PATH = re.compile(r"[\r\n]")
 REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
 
 
 class UnreadableFile(ValueError):
@@ -24,11 +26,23 @@ class FileChange:
     path: str
     old_path: str
     modes: tuple[str, str] = ("100644", "100644")
-    added_lines: frozenset[int] = field(default_factory=frozenset)
+    line_map: LineMap = field(default_factory=LineMap)
+
+    @property
+    def added_lines(self) -> frozenset[int]:
+        return self.line_map.added_lines
 
     @property
     def mode_changed(self) -> bool:
         return self.modes[0] != self.modes[1]
+
+    @property
+    def head_is_regular_file(self) -> bool:
+        return self.modes[1] in REGULAR_FILE_MODES
+
+    @property
+    def base_is_regular_file(self) -> bool:
+        return self.modes[0] in REGULAR_FILE_MODES
 
     @property
     def is_regular_file(self) -> bool:
@@ -50,7 +64,7 @@ class Repository:
         return done.stdout
 
     def changes(self, revisions: Revisions) -> list[FileChange]:
-        added = self._added_lines(revisions)
+        hunks = self._hunks(revisions)
         fields = self.git("diff", "--raw", "-z", "-M", "--no-abbrev", revisions.base, revisions.head).split("\0")
         changes, index = [], 0
         while index < len(fields) - 1:
@@ -58,23 +72,23 @@ class Repository:
             path_count = 2 if status[0] in "RC" else 1
             paths = fields[index + 1:index + 1 + path_count]
             index += 1 + path_count
-            lines = frozenset(added.get(paths[-1], ()))
-            changes.append(FileChange(status[0], paths[-1], paths[0], (old_mode, new_mode), lines))
+            line_map = LineMap(tuple(hunks.get(paths[-1], ())))
+            changes.append(FileChange(status[0], paths[-1], paths[0], (old_mode, new_mode), line_map))
         return changes
 
-    def _added_lines(self, revisions: Revisions) -> dict[str, set[int]]:
+    def _hunks(self, revisions: Revisions) -> dict[str, list[Hunk]]:
         diff = self.git("diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--dst-prefix=b/", revisions.base, revisions.head)
-        added: dict[str, set[int]] = {}
-        current: set[int] = set()
-        for line in diff.splitlines():
+        hunks: dict[str, list[Hunk]] = {}
+        current: list[Hunk] = []
+        for line in diff.split("\n"):
             if line.startswith("+++ "):
-                current = added.setdefault(line[6:], set()) if line.startswith("+++ b/") else set()
+                path = _diff_header_path(line[4:])
+                current = hunks.setdefault(path[2:], []) if path.startswith("b/") else []
                 continue
-            hunk = HUNK.match(line)
+            hunk = Hunk.parse(line)
             if hunk:
-                start, count = int(hunk.group(1)), int(hunk.group(2) or 1)
-                current.update(range(start, start + count))
-        return added
+                current.append(hunk)
+        return hunks
 
     def read(self, revision: str, paths: list[str]) -> dict[str, str | UnreadableFile]:
         """UTF-8 contents of paths at revision; paths absent there are left out, undecodable ones are errors."""
@@ -90,6 +104,28 @@ class Repository:
 
     def paths(self, revision: str) -> list[str]:
         return [path for path in self.git("ls-tree", "-r", "-z", "--name-only", revision).split("\0") if path]
+
+
+def _diff_header_path(field: str) -> str:
+    """A ---/+++ path as git writes it: C-quoted when it has special characters, tab-terminated when it has spaces."""
+    if not field.startswith('"'):
+        return field.removesuffix("\t")
+    raw, index = bytearray(), 1
+    while index < len(field) and field[index] != '"':
+        index = _unescape_into(raw, field, index)
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def _unescape_into(raw: bytearray, field: str, index: int) -> int:
+    if field[index] != "\\":
+        raw += field[index].encode("utf-8", errors="surrogateescape")
+        return index + 1
+    escape = field[index + 1]
+    if escape in C_ESCAPES:
+        raw.append(C_ESCAPES[escape])
+        return index + 2
+    raw.append(int(field[index + 1:index + 4], 8))
+    return index + 4
 
 
 def _decode(blob: bytes) -> str | UnreadableFile:

@@ -3,6 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from .csharp_methods import find_methods
 from .dialects import CSharpScanner, HclScanner, ShellScanner
 from .python_lexer import lex_python
 from .tokens import Lexed, LexError
@@ -30,9 +31,15 @@ def _lf_or_crlf_only(lex: Callable[[str], Lexed]) -> Callable[[str], Lexed]:
     return lex_checked
 
 
-CSHARP = Language("csharp", lambda text: CSharpScanner(text).lex(), verifiable=True)
-RAZOR = Language("razor", CSHARP.lex, verifiable=False)
-C_FAMILY = Language("c-family", CSHARP.lex, verifiable=False)
+def _lex_csharp(text: str) -> Lexed:
+    lexed = CSharpScanner(text).lex()
+    lexed.functions = find_methods(lexed.tokens)
+    return lexed
+
+
+CSHARP = Language("csharp", _lex_csharp, verifiable=True)
+RAZOR = Language("razor", lambda text: CSharpScanner(text).lex(), verifiable=False)
+C_FAMILY = Language("c-family", RAZOR.lex, verifiable=False)
 PYTHON = Language("python", _lf_or_crlf_only(lex_python), verifiable=True)
 TYPESCRIPT = Language("typescript", None, verifiable=True)
 TERRAFORM = Language("terraform", _lf_or_crlf_only(lambda text: HclScanner(text).lex()), verifiable=True)

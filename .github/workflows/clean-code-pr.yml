@@ -1,0 +1,14 @@
+name: Clean code PR check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  clean-code:
+    uses: ./.github/workflows/clean-code.yml
+    with:
+      exclude: clean-code/tests/fixtures/**

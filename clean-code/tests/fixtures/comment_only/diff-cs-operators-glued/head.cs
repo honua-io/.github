@@ -1,0 +1,1 @@
+var same = a == b;

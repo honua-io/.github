@@ -77,12 +77,22 @@ function functionName(node, source) {
   return node.kind === ts.SyntaxKind.Constructor ? "constructor" : "<anonymous>";
 }
 
+function isBooleanParameter(parameter) {
+  const initializer = parameter.initializer?.kind;
+  const booleanLiteral = initializer === ts.SyntaxKind.TrueKeyword || initializer === ts.SyntaxKind.FalseKeyword;
+  return parameter.type?.kind === ts.SyntaxKind.BooleanKeyword || booleanLiteral;
+}
+
+function describeFunction(node, source) {
+  const parameters = node.parameters.map((parameter) => [parameter.name.getText(source), isBooleanParameter(parameter)]);
+  const start = lineOf(source, node.getStart(source));
+  return [functionName(node, source), start, lineOf(source, node.getEnd()), parameters, ts.isConstructorDeclaration(node)];
+}
+
 function collectFunctions(source) {
   const functions = [];
   const visit = (node) => {
-    if (ts.isFunctionLike(node) && node.body && !isTestBlockCallback(node)) {
-      functions.push([functionName(node, source), lineOf(source, node.getStart(source)), lineOf(source, node.getEnd())]);
-    }
+    if (ts.isFunctionLike(node) && node.body && !isTestBlockCallback(node)) functions.push(describeFunction(node, source));
     ts.forEachChild(node, visit);
   };
   visit(source);

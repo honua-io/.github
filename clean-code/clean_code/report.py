@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from .comment_only import Verdict
 from .findings import Finding
 
-QUALITY_EXCEPTION = re.compile(r"^\s*quality-exception:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE)
-DECLARATION = re.compile(r"^\s*clean-code:\s*([\w-]+)\s*$", re.IGNORECASE | re.MULTILINE)
+QUALITY_EXCEPTION = re.compile(r"^[ \t]*quality-exception:[ \t]*(\S.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+DECLARATION = re.compile(r"^[ \t]*clean-code:[ \t]*([\w-]+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 SUMMARY_ROW_LIMIT = 200
 
 

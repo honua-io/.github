@@ -6,12 +6,11 @@ from dataclasses import dataclass
 
 from ..budgets import BUDGETS
 from ..context import CheckContext
-from ..correspondence import base_counterpart
 from ..findings import Finding, Location
 from ..git import FileChange
 from ..lexing import CSHARP, PYTHON, TYPESCRIPT, language_of
 from ..paths import is_test_path
-from ..tokens import Function, Lexed
+from ..tokens import Function
 
 PARAMETER_COUNT_LANGUAGES = frozenset({CSHARP.name})
 FLAG_ARGUMENT_LANGUAGES = frozenset({CSHARP.name, TYPESCRIPT.name, PYTHON.name})
@@ -45,17 +44,15 @@ def check_functions(context: CheckContext) -> Iterator[Finding]:
     for change in context.changes:
         lexed = context.lexed.get(change.path)
         if lexed is not None:
-            yield from _file_findings(change, lexed, context.base_lexed.get(change.path))
+            yield from _file_findings(change, lexed.functions, context.function_pairs(change))
 
 
-def _file_findings(change: FileChange, lexed: Lexed, base: Lexed | None) -> Iterator[Finding]:
+def _file_findings(change: FileChange, functions: list[Function], pairs: dict[Function, Function]) -> Iterator[Finding]:
     language = language_of(change.path).name
-    base_functions = base.functions if base else []
-    for function in lexed.functions:
+    for function in functions:
         added = [line for line in range(function.start, function.end + 1) if line in change.added_lines]
         if added:
-            counterpart = base_counterpart(function, change, base_functions)
-            touched = _FunctionChange(function, counterpart, Location(change.path, added[0]))
+            touched = _FunctionChange(function, pairs.get(function), Location(change.path, added[0]))
             yield from _length_findings(touched)
             yield from _parameter_findings(touched, language)
 
@@ -63,7 +60,8 @@ def _file_findings(change: FileChange, lexed: Lexed, base: Lexed | None) -> Iter
 def _length_findings(touched: _FunctionChange) -> Iterator[Finding]:
     length = touched.head.length
     if length > BUDGETS.function_lines and length > touched.base_length:
-        message = f"{touched.head.name} is {length} lines; extract steps"
+        grew = f"grew from {touched.base_length} to" if touched.base else "is"
+        message = f"{touched.head.name} {grew} {length} lines; extract steps"
         yield Finding.of("clean-code/function-length", touched.location, message)
 
 

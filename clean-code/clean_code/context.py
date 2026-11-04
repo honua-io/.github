@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
 
+from .correspondence import FileFunctions, pair_functions
 from .git import FileChange, Repository, Revisions
 from .lexing import language_of, lex_files
 from .paths import GENERATED_OR_VENDORED, matches_any
-from .tokens import Lexed
+from .tokens import Function, Lexed
 
 
 class XmlDocPolicy(Enum):
@@ -27,6 +28,7 @@ class CheckContext:
         self.revisions = revisions
         self.options = options
         self.changes = [change for change in repository.changes(revisions) if self.is_checked(change)]
+        self._function_pairs: dict[str, dict[Function, Function]] = {}
 
     def is_checked(self, change: FileChange) -> bool:
         excluded = matches_any(change.path, GENERATED_OR_VENDORED + self.options.excludes)
@@ -54,6 +56,14 @@ class CheckContext:
     def base_lexed(self) -> dict[str, Lexed]:
         return _lexed_only(self.base_texts)
 
+    def function_pairs(self, change: FileChange) -> dict[Function, Function]:
+        """Each head function of the file mapped to the base function it continues; new functions are absent."""
+        if change.path not in self._function_pairs:
+            head = _file_functions(self.lexed.get(change.path), self.head_texts.get(change.path, ""))
+            base = _file_functions(self.base_lexed.get(change.path), self.base_texts.get(change.path, ""))
+            self._function_pairs[change.path] = pair_functions(change, head, base)
+        return self._function_pairs[change.path]
+
     @cached_property
     def unchecked(self) -> list[str]:
         """Changed source files no rule saw: unreadable or unlexable at head."""
@@ -66,3 +76,7 @@ def readable_texts(repository: Repository, revision: str, paths: list[str]) -> d
 
 def _lexed_only(texts: dict[str, str]) -> dict[str, Lexed]:
     return {path: result for path, result in lex_files(texts).items() if isinstance(result, Lexed)}
+
+
+def _file_functions(lexed: Lexed | None, text: str) -> FileFunctions:
+    return FileFunctions(lexed.functions if lexed else [], text.split("\n"))

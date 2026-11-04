@@ -112,6 +112,59 @@ class LinterCorrespondence(unittest.TestCase):
         self.assertNotIn("eslint/max-params", self.findings({"src/w.ts": base}, {"src/w.ts": renamed}))
 
 
+class OneToOnePairing(unittest.TestCase):
+    """A base function's allowance continues in at most one head function."""
+
+    def findings(self, base: dict[str, str], head: dict[str, str]) -> set[str]:
+        pull_request = PullRequest(base)
+        self.addCleanup(pull_request.close)
+        return rule_keys(pull_request.findings(head))
+
+    def test_splitting_a_function_makes_the_other_half_new(self):
+        base = "def original(force: bool):\n    prepare()\n    publish()\n    return 1\n"
+        head = "def first(force: bool):\n    prepare()\n\n\ndef second(force: bool):\n    publish()\n    return 1\n"
+        self.assertIn("clean-code/flag-argument", self.findings({"src/s.py": base}, {"src/s.py": head}))
+
+    def test_a_new_nested_function_does_not_inherit_its_parents_flags(self):
+        base = "def outer(force: bool):\n    if force:\n        return 1\n    return 0\n"
+        head = base.replace("    if force:", "    def inner(enabled: bool):")
+        self.assertIn("clean-code/flag-argument", self.findings({"src/n.py": base}, {"src/n.py": head}))
+
+    def test_splitting_a_csharp_method_does_not_reuse_its_parameter_budget(self):
+        base = csharp_class("    void Original(int a, int b, int c, int d, int e, int f)\n    {\n        Prepare();\n        Publish();\n    }\n")
+        head = csharp_class("    void First(int a, int b, int c, int d, int e)\n    {\n        Prepare();\n    }\n",
+                            "    void Second(int a, int b, int c, int d, int e)\n    {\n        Publish();\n    }\n")
+        self.assertIn("clean-code/too-many-parameters", self.findings({"src/W.cs": base}, {"src/W.cs": head}))
+
+    def test_rewritten_or_reordered_functions_keep_their_baseline(self):
+        base = {"src/r.py": "def work(a, b, c, d, e):\n    return a\n",
+                "src/o.py": "def first(a, b, c, d, e):\n    return a\n\n\ndef second(x):\n    return x\n",
+                "src/t.ts": "export function process(a: number, b: number, c: number, d: number, e: number) { return b; }\n"}
+        head = {"src/r.py": "def work(alpha, b, c, d, e):\n    return alpha\n",
+                "src/o.py": "def second(x):\n    return x\n\n\ndef first(a, b, c, d, e):\n    return a\n",
+                "src/t.ts": base["src/t.ts"].replace("(a: number", "(alpha: number")}
+        found = self.findings(base, head)
+        self.assertFalse({"ruff/PLR0913", "eslint/max-params"} & found, found)
+
+
+class Measures(unittest.TestCase):
+    def findings(self, base: dict[str, str], head: dict[str, str]) -> set[str]:
+        pull_request = PullRequest(base)
+        self.addCleanup(pull_request.close)
+        return rule_keys(pull_request.findings(head))
+
+    def test_digits_in_a_function_name_do_not_hide_worsening(self):
+        base = "export function process2(\n  a: number, b: number, c: number, d: number, e: number,\n) {\n  return a;\n}\n"
+        head = base.replace("e: number,", "e: number, f: number,")
+        self.assertIn("eslint/max-params", self.findings({"src/p.ts": base}, {"src/p.ts": head}))
+
+    def test_growing_complexity_is_new(self):
+        branches = "".join(f"    if x == {index}:\n        return {index}\n" for index in range(11))
+        base = "def process2(x):\n" + branches + "    return -1\n"
+        head = base.replace("    return -1\n", "    if x == 99:\n        return 99\n    return -1\n")
+        self.assertIn("ruff/C901", self.findings({"src/c.py": base}, {"src/c.py": head}))
+
+
 class DuplicationRatchet(unittest.TestCase):
     def setUp(self):
         self.block = numbered_lines(16, "value_{0} = compute({0}, offset_{0}, scale)")

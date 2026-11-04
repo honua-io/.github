@@ -13,7 +13,7 @@ from pathlib import Path
 from ..budgets import BUDGETS
 from ..catalog import RULES
 from ..context import CheckContext
-from ..correspondence import base_counterpart, enclosing_function
+from ..correspondence import enclosing_function
 from ..findings import Finding, Location
 from ..git import FileChange
 from ..lexing import PYTHON, TYPESCRIPT, language_of
@@ -70,11 +70,14 @@ def check_with_eslint(context: CheckContext) -> list[Finding]:
     return _introduced_findings(context, ESLINT)
 
 
-FUNCTION_LEVEL_RULES = frozenset({
-    "ruff/PLR0913", "ruff/PLR0915", "ruff/C901",
-    "eslint/max-params", "eslint/complexity", "eslint/sonarjs/cognitive-complexity",
-})
-MEASURE = re.compile(r"\d+")
+MEASURES = {
+    "ruff/PLR0913": re.compile(r"\((\d+) > \d+\)"),
+    "ruff/PLR0915": re.compile(r"\((\d+) > \d+\)"),
+    "ruff/C901": re.compile(r"\((\d+) > \d+\)"),
+    "eslint/max-params": re.compile(r"too many parameters \((\d+)\)"),
+    "eslint/complexity": re.compile(r"complexity of (\d+)"),
+    "eslint/sonarjs/cognitive-complexity": re.compile(r"Complexity from (\d+) to"),
+}
 
 
 def _introduced_findings(context: CheckContext, tool: _Tool) -> list[Finding]:
@@ -99,8 +102,8 @@ class _FileRevisions:
         self.change = change
         self.head_functions = _functions(context.lexed.get(change.path))
         self.base_functions = _functions(context.base_lexed.get(change.path))
+        self.pairs = context.function_pairs(change)
         self.unmatched = _grouped(base_findings, lambda finding: finding.rule.key)
-        self._counterparts: dict[Function, Function | None] = {}
 
     def consume_existing(self, finding: Finding) -> bool:
         """True, and the base match is used up, when base already had this finding (or a worse one)."""
@@ -112,16 +115,11 @@ class _FileRevisions:
 
     def _corresponds(self, finding: Finding, base: Finding) -> bool:
         head_function = enclosing_function(finding.location.line, self.head_functions)
-        if finding.rule.key in FUNCTION_LEVEL_RULES and head_function is not None:
-            counterpart = self._counterpart(head_function)
-            same_function = counterpart is not None and enclosing_function(base.location.line, self.base_functions) is counterpart
+        if finding.rule.key in MEASURES and head_function is not None:
+            counterpart = self.pairs.get(head_function)
+            same_function = counterpart is not None and enclosing_function(base.location.line, self.base_functions) == counterpart
             return same_function and _measure(base) >= _measure(finding)
         return self.change.line_map.base_line(finding.location.line) == base.location.line
-
-    def _counterpart(self, head_function: Function) -> Function | None:
-        if head_function not in self._counterparts:
-            self._counterparts[head_function] = base_counterpart(head_function, self.change, self.base_functions)
-        return self._counterparts[head_function]
 
 
 def _functions(lexed: Lexed | None) -> list[Function]:
@@ -129,9 +127,9 @@ def _functions(lexed: Lexed | None) -> list[Function]:
 
 
 def _measure(finding: Finding) -> int:
-    """The measured value tools put first in their messages, e.g. 'Too many arguments (6 > 4)'."""
-    measured = MEASURE.search(finding.message)
-    return int(measured.group()) if measured else 0
+    """The measured value in the rule's own message format, e.g. 'Too many arguments (6 > 4)' -> 6."""
+    measured = MEASURES[finding.rule.key].search(finding.message)
+    return int(measured.group(1)) if measured else 0
 
 
 def _grouped(findings: list[Finding], key: Callable[[Finding], str]) -> dict[str, list[Finding]]:

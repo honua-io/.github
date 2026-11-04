@@ -41,6 +41,9 @@ class Declarations(unittest.TestCase):
         body = "This PR is a `clean-code: comment-only` cleanup.\nclean-code: docstring-removal\n"
         self.assertEqual(declarations(body), {"docstring-removal"})
 
+    def test_a_declaration_may_not_span_lines(self):
+        self.assertEqual(declarations("clean-code:\ncomment-only\n"), set())
+
     def test_a_disproved_comment_only_claim_fails_even_under_an_exception(self):
         report = Report([], ["bulk cleanup"], comment_only_verdicts=[Verdict("a.cs", "code differs")])
         self.assertFalse(report.passed)

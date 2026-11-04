@@ -43,6 +43,8 @@ def verify_diff(repository: Repository, revisions: Revisions, policy: DocstringP
 def _structural_problem(change: FileChange) -> str | None:
     if change.status != "M":
         return f"file status {change.status}: only in-place modifications can be comment-only"
+    if not change.is_regular_file:
+        return f"not a regular file (mode {change.modes[1]})"
     if change.mode_changed:
         return f"file mode changed from {change.modes[0]} to {change.modes[1]}"
     language = language_of(change.path)

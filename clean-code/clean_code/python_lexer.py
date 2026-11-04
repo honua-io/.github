@@ -18,7 +18,7 @@ def lex_python(text: str) -> Lexed:
         tree = ast.parse(text)
     except (tokenize.TokenError, SyntaxError) as error:
         raise LexError(f"Python does not parse: {error}") from error
-    docstrings = _docstring_spans(tree)
+    docstrings = _docstring_spans(tree, text.splitlines(keepends=True))
     lexed = Lexed(PYTHON_GAPS, functions=_functions(tree))
     for raw in raw_tokens:
         _add_token(lexed, raw, docstrings)
@@ -31,7 +31,7 @@ def _add_token(lexed: Lexed, raw: tokenize.TokenInfo, docstrings: list[tuple[Pos
         return
     if raw.type in IGNORED:
         return
-    is_docstring = raw.type == tokenize.STRING and any(start <= raw.start < end for start, end in docstrings)
+    is_docstring = raw.type == tokenize.STRING and any(start <= raw.start and raw.end <= end for start, end in docstrings)
     if is_docstring:
         lines = raw.string.split("\n")
         lexed.comments.extend(Comment(raw.start[0] + offset, line) for offset, line in enumerate(lines))
@@ -39,15 +39,22 @@ def _add_token(lexed: Lexed, raw: tokenize.TokenInfo, docstrings: list[tuple[Pos
     lexed.tokens.append(Token(text, raw.start[0], is_docstring=is_docstring))
 
 
-def _docstring_spans(tree: ast.Module) -> list[tuple[Position, Position]]:
+def _docstring_spans(tree: ast.Module, lines: list[str]) -> list[tuple[Position, Position]]:
+    """Docstring expressions as (row, character column) spans, the coordinates tokenize reports."""
     spans = []
     for node in ast.walk(tree):
         if not isinstance(node, DOCSTRING_OWNERS) or not node.body:
             continue
         first = node.body[0]
         if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
-            spans.append(((first.lineno, first.col_offset), (first.end_lineno, first.end_col_offset)))
+            start = (first.lineno, _character_column(lines, first.lineno, first.col_offset))
+            spans.append((start, (first.end_lineno, _character_column(lines, first.end_lineno, first.end_col_offset))))
     return spans
+
+
+def _character_column(lines: list[str], row: int, byte_offset: int) -> int:
+    """ast columns count UTF-8 bytes; tokenize columns count characters."""
+    return len(lines[row - 1].encode("utf-8")[:byte_offset].decode("utf-8"))
 
 
 def _functions(tree: ast.Module) -> list[Function]:

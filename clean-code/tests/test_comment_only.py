@@ -62,6 +62,14 @@ class DiffVerification(unittest.TestCase):
         (self.scratch.root / "a.cs").chmod(0o755)
         self.assertIn("file mode changed", self.verdicts({})["a.cs"])
 
+    def test_retargeted_symlink_fails(self):
+        self.base = self.scratch.commit({"old.py": "value = 1\n", "new.py": "value = 2\n"})
+        (self.scratch.root / "a.py").symlink_to("old.py#x")
+        self.base = self.scratch.commit({})
+        (self.scratch.root / "a.py").unlink()
+        (self.scratch.root / "a.py").symlink_to("new.py#x")
+        self.assertIn("not a regular file", self.verdicts({})["a.py"])
+
     def test_undecodable_bytes_fail(self):
         self.base = self.scratch.commit({".gitattributes": "*.py -diff\n", "latin.py": b"s = '\xe9'\n"})
         self.assertIn("not UTF-8", self.verdicts({"latin.py": b"s = '\xea'\n"})["latin.py"])
@@ -73,6 +81,21 @@ class DiffVerification(unittest.TestCase):
     def test_code_change_fails_with_location(self):
         problem = self.verdicts({"a.cs": "int a = 2; // one\n"})["a.cs"]
         self.assertIn("line 1", problem)
+
+
+class BatchFraming(unittest.TestCase):
+    def test_malformed_replies_are_refused(self):
+        from clean_code.git import _parse_batch
+
+        for reply in (b"abc blob -1\n", b"abc blob 4\nx=1\nX", b"abc blob 9\nx=1\n", b"abc tree 3\nx=1\n"):
+            with self.subTest(reply):
+                with self.assertRaises(RuntimeError):
+                    list(_parse_batch(reply, ["a.py"]))
+
+    def test_well_formed_reply_is_read(self):
+        from clean_code.git import _parse_batch
+
+        self.assertEqual(list(_parse_batch(b"abc blob 4\nx=1\n\n", ["a.py"])), [("a.py", b"x=1\n")])
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from pathlib import Path
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 UNSAFE_PATH = re.compile(r"[\r\n]")
+REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 
 class UnreadableFile(ValueError):
@@ -28,6 +29,11 @@ class FileChange:
     @property
     def mode_changed(self) -> bool:
         return self.modes[0] != self.modes[1]
+
+    @property
+    def is_regular_file(self) -> bool:
+        """False for symlinks and submodules, whose blobs are link targets or commit ids, not source."""
+        return self.modes[1] in REGULAR_FILE_MODES and self.modes[0] in REGULAR_FILE_MODES | {"000000"}
 
 
 class Repository:
@@ -101,9 +107,9 @@ def _parse_batch(output: bytes, paths: list[str]):
         offset = header_end + 1
         if header[-1] == b"missing":
             continue
-        if len(header) != 3 or header[1] != b"blob":
+        size = int(header[2]) if len(header) == 3 and header[1] == b"blob" and header[2].isdigit() else -1
+        if size < 0 or output[offset + size:offset + size + 1] != b"\n":
             raise RuntimeError(f"unexpected git cat-file reply for {path!r}: {header!r}")
-        size = int(header[2])
         yield path, output[offset:offset + size]
         offset += size + 1
     if offset != len(output):

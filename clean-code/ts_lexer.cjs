@@ -26,26 +26,16 @@ function isEmptyJsxExpression(node) {
   return node.kind === ts.SyntaxKind.JsxExpression && !node.expression;
 }
 
-// The JSX transform's whitespace rule: inner lines are trimmed, blank lines dropped, the rest joined by spaces.
-function jsxChildText(raw) {
-  const lines = raw.replace(/\t/g, " ").split(/\r\n|\n|\r/);
-  const lastNonEmpty = lines.reduce((last, line, index) => (/[^ ]/.test(line) ? index : last), -1);
-  return lines
-    .map((line, index) => (index === 0 ? line : line.replace(/^ +/, "")))
-    .map((line, index) => (index === lines.length - 1 ? line : line.replace(/ +$/, "")))
-    .map((line, index) => (line && index !== lastNonEmpty ? `${line} ` : line))
-    .join("");
-}
-
-// Each JSX text child stays separate: deleting a {/* comment */} between two texts changes the children.
+// JSX text is compared exactly, child by child. Only whitespace-only text spanning a line break is dropped,
+// as the JSX transform drops it; deleting a {/* comment */} between two texts changes the children and fails.
 function collectTokens(source) {
   const tokens = [];
   const visit = (node) => {
-    if (isJsDoc(node) || isEmptyJsxExpression(node)) return;
+    if (isJsDoc(node) || isEmptyJsxExpression(node) || node.containsOnlyTriviaWhiteSpaces) return;
     const children = node.getChildren(source);
     if (children.length > 0) return children.forEach(visit);
     const isJsxText = node.kind === ts.SyntaxKind.JsxText;
-    const text = isJsxText ? jsxChildText(node.getFullText(source)) : node.getText(source);
+    const text = isJsxText ? node.getFullText(source) : node.getText(source);
     if (!text) return;
     const trivia = source.text.slice(node.getFullStart(), node.getStart(source));
     tokens.push([text, lineOf(source, node.getStart(source)), !isJsxText && LINE_BREAK.test(trivia) ? "\n" : ""]);

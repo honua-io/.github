@@ -54,7 +54,7 @@ class Report:
             lines.append(f"- **quality-exception:** {reason}")
         if self.unchecked:
             listed = ", ".join(f"`{path}`" for path in self.unchecked)
-            lines.append(f"- Not checked (unreadable, unlexable or minified): {listed}")
+            lines.append(f"- Not checked (unreadable or unlexable): {listed}")
         lines += self._comment_only_lines()
         if self.findings:
             lines += ["", "| Smell | Severity | Location | Finding |", "| --- | --- | --- | --- |"]

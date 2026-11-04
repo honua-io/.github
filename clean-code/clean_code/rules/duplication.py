@@ -1,4 +1,4 @@
-"""G5: blocks of added code that already exist elsewhere at head (or twice in the PR)."""
+"""G5: added blocks whose copies at head outnumber those at base, so the PR introduced a clone (moves don't count)."""
 
 import re
 from collections import defaultdict
@@ -25,7 +25,8 @@ class _Window:
 class _SignificantLines:
     """A file's non-trivial lines, normalized, with their line numbers and token counts."""
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, language: str):
+        self.language = language
         stripped = ((number, line.strip()) for number, line in enumerate(text.split("\n"), 1))
         kept = [(number, line) for number, line in stripped if not TRIVIAL_LINE.match(line)]
         self.numbers = [number for number, _ in kept]
@@ -36,7 +37,7 @@ class _SignificantLines:
         """(index, hash) of every run of duplicate_lines consecutive significant lines."""
         size = BUDGETS.duplicate_lines
         for index in range(len(self.hashes) - size + 1):
-            yield index, hash(tuple(self.hashes[index:index + size]))
+            yield index, hash((self.language, tuple(self.hashes[index:index + size])))
 
     def window(self, path: str, index: int) -> _Window:
         return _Window(path, self.numbers[index], self.numbers[index + BUDGETS.duplicate_lines - 1])
@@ -49,8 +50,10 @@ def check_duplication(context: CheckContext) -> Iterator[Finding]:
     candidates = _added_windows(context)
     if not candidates:
         return
-    occurrences = _occurrences(context, set(candidates))
-    for path, regions in _clone_regions(candidates, occurrences).items():
+    at_head = _occurrences(context, context.revisions.head, set(candidates))
+    at_base = _occurrences(context, context.revisions.base, set(candidates))
+    introduced = {key: windows for key, windows in candidates.items() if len(at_head[key]) > len(at_base[key])}
+    for path, regions in _clone_regions(introduced, at_head).items():
         for first_line, other in regions:
             message = f"repeats {other.path}:{other.first_line}; extract a shared helper"
             yield Finding.of("clean-code/duplication", Location(path, first_line), message)
@@ -59,7 +62,7 @@ def check_duplication(context: CheckContext) -> Iterator[Finding]:
 def _added_windows(context: CheckContext) -> dict[int, list[_Window]]:
     candidates: dict[int, list[_Window]] = defaultdict(list)
     for change in context.changes:
-        lines = _SignificantLines(context.head_texts.get(change.path, ""))
+        lines = _SignificantLines(context.head_texts.get(change.path, ""), language_of(change.path).name)
         for index, window_hash in lines.windows():
             window = lines.window(change.path, index)
             span = lines.numbers[index:index + BUDGETS.duplicate_lines]
@@ -68,13 +71,13 @@ def _added_windows(context: CheckContext) -> dict[int, list[_Window]]:
     return candidates
 
 
-def _occurrences(context: CheckContext, wanted: set[int]) -> dict[int, list[_Window]]:
+def _occurrences(context: CheckContext, revision: str, wanted: set[int]) -> dict[int, list[_Window]]:
     languages = {language_of(change.path).name for change in context.changes}
     excludes = GENERATED_OR_VENDORED + context.options.excludes
-    paths = [path for path in context.repository.paths(context.revisions.head) if _is_peer(path, languages, excludes)]
+    paths = [path for path in context.repository.paths(revision) if _is_peer(path, languages, excludes)]
     found: dict[int, list[_Window]] = defaultdict(list)
-    for path, text in readable_texts(context.repository, context.revisions.head, paths).items():
-        lines = _SignificantLines(text)
+    for path, text in readable_texts(context.repository, revision, paths).items():
+        lines = _SignificantLines(text, language_of(path).name)
         for index, window_hash in lines.windows():
             if window_hash in wanted:
                 found[window_hash].append(lines.window(path, index))

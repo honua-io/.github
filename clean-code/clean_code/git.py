@@ -6,6 +6,7 @@ from pathlib import Path
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 UNSAFE_PATH = re.compile(r"[\r\n]")
 REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
 
 
 class UnreadableFile(ValueError):
@@ -29,6 +30,14 @@ class FileChange:
     @property
     def mode_changed(self) -> bool:
         return self.modes[0] != self.modes[1]
+
+    @property
+    def head_is_regular_file(self) -> bool:
+        return self.modes[1] in REGULAR_FILE_MODES
+
+    @property
+    def base_is_regular_file(self) -> bool:
+        return self.modes[0] in REGULAR_FILE_MODES
 
     @property
     def is_regular_file(self) -> bool:
@@ -68,7 +77,8 @@ class Repository:
         current: set[int] = set()
         for line in diff.split("\n"):
             if line.startswith("+++ "):
-                current = added.setdefault(line[6:], set()) if line.startswith("+++ b/") else set()
+                path = _diff_header_path(line[4:])
+                current = added.setdefault(path[2:], set()) if path.startswith("b/") else set()
                 continue
             hunk = HUNK.match(line)
             if hunk:
@@ -90,6 +100,28 @@ class Repository:
 
     def paths(self, revision: str) -> list[str]:
         return [path for path in self.git("ls-tree", "-r", "-z", "--name-only", revision).split("\0") if path]
+
+
+def _diff_header_path(field: str) -> str:
+    """A ---/+++ path as git writes it: C-quoted when it has special characters, tab-terminated when it has spaces."""
+    if not field.startswith('"'):
+        return field.removesuffix("\t")
+    raw, index = bytearray(), 1
+    while index < len(field) and field[index] != '"':
+        index = _unescape_into(raw, field, index)
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def _unescape_into(raw: bytearray, field: str, index: int) -> int:
+    if field[index] != "\\":
+        raw += field[index].encode("utf-8", errors="surrogateescape")
+        return index + 1
+    escape = field[index + 1]
+    if escape in C_ESCAPES:
+        raw.append(C_ESCAPES[escape])
+        return index + 2
+    raw.append(int(field[index + 1:index + 4], 8))
+    return index + 4
 
 
 def _decode(blob: bytes) -> str | UnreadableFile:

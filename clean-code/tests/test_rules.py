@@ -50,7 +50,7 @@ class RuleFixtures(unittest.TestCase):
                 with self.subTest(f"{rule_directory.name}/{fixture.name}"):
                     target = f"src/{rule_directory.name}/{fixture.name}"
                     found = rule_keys(self.pull_request.findings({target: fixture.read_text()}))
-                    self.assertEqual(key in found, fixture.stem == "bad", found)
+                    self.assertEqual(key in found, fixture.stem.startswith("bad"), found)
 
 
 class LineScope(unittest.TestCase):
@@ -77,11 +77,12 @@ class LineScope(unittest.TestCase):
         self.assertEqual(found, [])
 
 
-    def test_minified_files_are_skipped(self):
+    def test_hashed_bundles_are_skipped_but_long_lines_are_not(self):
         pull_request = PullRequest({"README.md": "x\n"})
         self.addCleanup(pull_request.close)
-        bundle = "// Fixes #1234.\n" + "var a=1;" * 200 + "\n"
-        self.assertEqual(pull_request.findings({"site/assets/main-3f2a.js": bundle}), [])
+        source = "// Fixes #1234.\n" + "var a=1;" * 200 + "\n"
+        found = pull_request.findings({"site/assets/main-3f2aB9xQ.js": source, "src/config.js": source})
+        self.assertEqual({finding.location.path for finding in found}, {"src/config.js"})
 
     def test_parameter_rules_skip_test_files(self):
         pull_request = PullRequest({"README.md": "x\n"})

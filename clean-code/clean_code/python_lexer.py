@@ -2,7 +2,7 @@ import ast
 import io
 import tokenize
 
-from .tokens import Comment, Function, GapRule, Lexed, LexError, Token
+from .tokens import Comment, Function, GapRule, Lexed, LexError, Parameter, Token
 
 PYTHON_GAPS = GapRule(newline_matters=False, glue_matters=False)
 IGNORED = frozenset({tokenize.NL, tokenize.ENCODING})
@@ -64,9 +64,23 @@ def _functions(tree: ast.Module) -> list[Function]:
         for child in ast.iter_child_nodes(node):
             name = f"{prefix}{getattr(child, 'name', '')}"
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append(Function(name, child.lineno, child.end_lineno))
+                functions.append(Function(name, child.lineno, child.end_lineno, _parameters(child.args)))
             is_scope = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             visit(child, f"{name}." if is_scope else prefix)
 
     visit(tree, "")
     return functions
+
+
+def _parameters(arguments: ast.arguments) -> tuple[Parameter, ...]:
+    """Named parameters other than self/cls; boolean when annotated `bool` or defaulting to True/False."""
+    positional = arguments.posonlyargs + arguments.args
+    defaults = [None] * (len(positional) - len(arguments.defaults)) + arguments.defaults
+    pairs = list(zip(positional, defaults)) + list(zip(arguments.kwonlyargs, arguments.kw_defaults))
+    named = [(argument, default) for argument, default in pairs if argument.arg not in {"self", "cls"}]
+    return tuple(Parameter(argument.arg, _is_boolean(argument, default)) for argument, default in named)
+
+
+def _is_boolean(argument: ast.arg, default: ast.expr | None) -> bool:
+    annotated = isinstance(argument.annotation, ast.Name) and argument.annotation.id == "bool"
+    return annotated or (isinstance(default, ast.Constant) and isinstance(default.value, bool))

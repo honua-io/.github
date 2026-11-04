@@ -35,6 +35,10 @@ LOOKS_LIKE_CODE = re.compile(
     r"^(?:(?:if|for|foreach|while|return|var|await|using|throw|new|public|private|protected|internal|static)\b.*[;{(=]"
     r"|[\w.\[\]]+\s*\(.*\)\s*;|.*[;{]\s*$|\}\s*$|[\w.-]+\s*=\s*[\"\w\[{].*[^.]$|export\s+\w+=)"
 )
+STATEMENT = re.compile(
+    r"^(?:return\b.*;|(?:var|let|const|await)\s+\S.*[;=(]|new\s+\w+\(.*|(?:if|for|foreach|while|switch)\s*\(.*"
+    r"|[\w.\[\]<>]+\s*=\s*\S.*;|[\w.\[\]<>]+\(.*\)\s*;)$"
+)
 STRING_LITERAL = re.compile(r'"[^"]*"|\'[^\']*\'')
 PROSE = re.compile(r"\b[A-Za-z]+ [A-Za-z]+ [A-Za-z]+\b")
 STOP_WORDS = frozenset("a an and as at be by for from if in into is it of on or the then this to with".split())
@@ -75,7 +79,9 @@ def _commented_out_code(path: str, comments: list[Comment]) -> Iterator[Finding]
 
 
 def _looks_like_code(text: str) -> bool:
-    """Code-shaped and not a sentence: three plain words in a row, outside string literals, read as prose."""
+    """A statement, or code-shaped and not a sentence (three plain words in a row outside string literals)."""
+    if STATEMENT.match(text):
+        return True
     return bool(LOOKS_LIKE_CODE.match(text)) and not PROSE.search(STRING_LITERAL.sub('""', text))
 
 

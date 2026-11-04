@@ -3,7 +3,7 @@ from functools import lru_cache
 
 GENERATED_OR_VENDORED = (
     "**/node_modules/**", "**/dist/**", "**/build/**", "**/vendor/**", "**/third_party/**", "**/wwwroot/lib/**",
-    "**/*.min.js", "**/*.bundle.js", "**/*.d.ts", "**/*.g.cs", "**/*.g.i.cs", "**/*.Designer.cs", "**/*.generated.*",
+    "**/*.min.*", "**/*.bundle.*", "**/assets/*-????????.{js,mjs,cjs,css}", "**/*.d.ts", "**/*.g.cs", "**/*.g.i.cs", "**/*.Designer.cs", "**/*.generated.*",
     "**/generated/**", "**/Generated/**", "**/Migrations/**", "**/*_pb2.py", "**/*_pb2_grpc.py", "**/*.pb.go",
     "**/__snapshots__/**",
 )
@@ -11,7 +11,6 @@ TEST_PATH = re.compile(
     r"(^|/)(tests?|__tests__|e2e|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$"
     r"|\.(test|spec)\.[^/]+$|Tests?\.cs$|(^|/)[^/]*\.Tests?/"
 )
-MINIFIED_LINE_LENGTH = 1000
 GLOB_PARTS = re.compile(r"\*\*/|\*\*|\*|\?|\{[^}]*\}|[^*?{]+")
 
 
@@ -37,7 +36,3 @@ def matches_any(path: str, globs: tuple[str, ...]) -> bool:
 def is_test_path(path: str) -> bool:
     return bool(TEST_PATH.search(path))
 
-
-def looks_minified(text: str) -> bool:
-    """Bundled or minified output committed as source; no rule here says anything useful about it."""
-    return any(len(line) > MINIFIED_LINE_LENGTH for line in text.splitlines())

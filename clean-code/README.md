@@ -4,7 +4,7 @@ Shared Clean Code tooling for honua-io repositories. The review rubric every rep
 
 ## PR check
 
-`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It judges only the lines and files the PR adds or changes, so existing code never fails it; it is a ratchet. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
+`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It is a ratchet: it reports only what the PR makes worse, so existing code never fails it. Comment rules judge added lines. Function rules compare each touched function with the same-named one at base: a function may not newly exceed a budget or grow while over it, nor gain a flag parameter. ruff and ESLint run on both base and head copies of the changed files, and a head finding counts only when base has no finding of the same rule on the same line text. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
 
 ```yaml
 # .github/workflows/clean-code.yml in a calling repository
@@ -42,9 +42,7 @@ jobs:
 | F1 | `clean-code/too-many-parameters` | More than 4 parameters | C# | block |
 | F1 | `eslint/max-params` | More than 4 parameters | TS/JS | block |
 | F1 | `ruff/PLR0913` | More than 4 parameters | Python | block |
-| F3 | `clean-code/flag-argument` | Boolean flag parameter | C#, TS/JS | block |
-| F3 | `ruff/FBT001` | Boolean flag parameter | Python | block |
-| F3 | `ruff/FBT002` | Boolean flag parameter with a default | Python | block |
+| F3 | `clean-code/flag-argument` | Boolean flag parameter | C#, TS/JS, Python | block |
 | F3 | `ruff/FBT003` | Boolean positional argument in a call | Python | advisory |
 | G25 | `eslint/no-magic-numbers` | Magic number | TS/JS | advisory |
 | G25 | `eslint/sonarjs/no-duplicate-string` | Duplicated string literal | TS/JS | advisory |
@@ -74,7 +72,9 @@ jobs:
 | Cyclomatic / cognitive complexity | 10 / 15 | G30 |
 | Nesting depth | 2 | G34 |
 
-Duplication: every run of 15 significant lines (blank, comment-only, punctuation-only and import/using lines are skipped) that the PR adds is hashed and compared with every file of the same language at head. A run that also appears elsewhere, including twice in the PR, is a clone the PR introduced; a moved block is not, because its old copy is gone at head.
+Duplication: every run of 15 significant lines (blank, comment-only, punctuation-only and import/using lines are skipped) that the PR adds is hashed per language and counted across the repository at base and at head. More copies at head than at base is a clone the PR introduced; a moved block is not.
+
+Skipped as generated or vendored: `node_modules`, `dist`, `build`, `vendor`, `third_party`, `wwwroot/lib`, `Migrations`, `generated`, snapshots, `*.min.*`, `*.bundle.*`, hashed bundles under `assets/`, `*.d.ts`, `*.g.cs`, `*.Designer.cs`, protobuf output, symlinks and submodules; callers add globs with `exclude`.
 
 Comments (C1): bare `#123`, `SEC-12`, `honua-*#12`, honua-io issue or PR links, "PR 12"/"issue 12", history wording ("previously", "no longer", "used to be", "was changed", "now we") and reviewer notes. References to external upstreams such as `dotnet/runtime#12345` are allowed: they explain a workaround. `xml-docs: forbid` flags every new `///` line; `public-summary` allows only a one-line `/// <summary>` and flags the rest.
 

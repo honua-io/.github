@@ -1,0 +1,8 @@
+{
+  "name": "honua-clean-code",
+  "private": true,
+  "description": "TypeScript parser for the clean-code check",
+  "dependencies": {
+    "typescript": "5.9.3"
+  }
+}

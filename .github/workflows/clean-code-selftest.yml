@@ -1,0 +1,31 @@
+name: Clean code self-test
+
+on:
+  pull_request:
+    paths:
+      - "clean-code/**"
+      - ".github/workflows/clean-code*.yml"
+  push:
+    branches: [main]
+    paths:
+      - "clean-code/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Clean code self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: clean-code
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install the TypeScript parser
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run the tests
+        run: python3 -m unittest discover -s tests -t . -v

@@ -1,0 +1,1 @@
+class C {// noteconst int X=1;}

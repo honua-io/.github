@@ -1,0 +1,2 @@
+def café():
+    return "é"

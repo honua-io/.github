@@ -1,0 +1,3 @@
+#if RELEASE
+Trace();
+#endif

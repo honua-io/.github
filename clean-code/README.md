@@ -15,14 +15,14 @@ It lexes both sides of every changed file, drops comments, and compares the code
 
 | Language | Lexer | Kept whole, never treated as comments |
 | --- | --- | --- |
-| C# (`.cs`, `.csx`) | `clean_code/dialects.py` | regular, verbatim, interpolated and raw strings; char literals; preprocessor lines (`#region` text is code) |
+| C# (`.cs`, `.csx`) | `clean_code/dialects.py` | regular, verbatim, interpolated and raw strings (including `$$"""` holes); char literals; preprocessor lines, exactly as written up to an unquoted `//` (`#region` text is code). Every C# line terminator ends a `//` comment: CR, LF, CRLF, NEL, U+2028, U+2029 |
 | Python (`.py`, `.pyi`) | `tokenize` + `ast` | strings, docstrings (see below) |
-| TypeScript, JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`, ...) | the TypeScript parser (`ts_lexer.cjs`) | strings, template literals, regex literals, JSX text |
+| TypeScript, JavaScript (`.ts`, `.tsx`, `.js`, `.mjs`, ...) | the TypeScript parser (`ts_lexer.cjs`) | strings, template literals, regex literals, JSX text children as the JSX transform sees them (deleting `{/* */}` between two texts changes the children, so it fails) |
 | Terraform, HCL (`.tf`, `.tfvars`, `.hcl`) | `clean_code/dialects.py` | template strings and heredocs |
 
-Any other changed file, and any added, deleted or renamed file, fails.
+Any other changed file fails, as does an added, deleted or renamed file, a file mode change, a file that is not UTF-8, a path containing a line break, and Python or Terraform with lone-CR line endings.
 
-Python docstrings are code. `--allow-docstring-removal` lets a PR delete docstrings that restate the code, never add or edit one; declare it in the PR body.
+Python docstrings are code. `--allow-docstring-removal` lets a PR delete docstrings that restate the code: every docstring left at head must be byte-identical to the one in the same place at base, so none can be added, edited or moved. Declare it in the PR body.
 
 ## Tests
 

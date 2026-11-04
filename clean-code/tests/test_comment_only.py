@@ -13,7 +13,8 @@ FIXTURES = Path(__file__).parent / "fixtures" / "comment_only"
 def fixture_verdict(case: Path) -> str | None:
     """Problem found between the case's base and head files, or None when the change is comment-only."""
     base, head = sorted(case.glob("base.*"))[0], sorted(case.glob("head.*"))[0]
-    lexed = lex_files({f"base{base.suffix}": base.read_text(), f"head{head.suffix}": head.read_text()})
+    texts = {f"base{base.suffix}": base.read_bytes().decode(), f"head{head.suffix}": head.read_bytes().decode()}
+    lexed = lex_files(texts)
     sides = [lexed[f"base{base.suffix}"], lexed[f"head{head.suffix}"]]
     errors = [side for side in sides if isinstance(side, LexError)]
     if errors:
@@ -56,6 +57,18 @@ class DiffVerification(unittest.TestCase):
         problems = self.verdicts({"new.cs": "// x\n", "gone.py": None, "notes.md": "other\n"})
         self.assertEqual(set(problems), {"new.cs", "gone.py", "notes.md"})
         self.assertTrue(all(problems.values()))
+
+    def test_mode_change_fails(self):
+        (self.scratch.root / "a.cs").chmod(0o755)
+        self.assertIn("file mode changed", self.verdicts({})["a.cs"])
+
+    def test_undecodable_bytes_fail(self):
+        self.base = self.scratch.commit({".gitattributes": "*.py -diff\n", "latin.py": b"s = '\xe9'\n"})
+        self.assertIn("not UTF-8", self.verdicts({"latin.py": b"s = '\xea'\n"})["latin.py"])
+
+    def test_paths_with_line_breaks_are_refused(self):
+        self.base = self.scratch.commit({"safe.py": "x = 1\n", "safe.py\nHEAD:safe.py": "x = 10\n"})
+        self.assertIn("line break", self.verdicts({"safe.py\nHEAD:safe.py": "x = 20\n"})["safe.py\nHEAD:safe.py"])
 
     def test_code_change_fails_with_location(self):
         problem = self.verdicts({"a.cs": "int a = 2; // one\n"})["a.cs"]

@@ -32,8 +32,10 @@ def verify_diff(repository: Repository, revisions: Revisions, policy: DocstringP
     candidates = [path for path, problem in problems.items() if problem is None]
     base_lexed = lex_files(repository.read(revisions.base, candidates))
     head_lexed = lex_files(repository.read(revisions.head, candidates))
+    missing = LexError("file is missing")
     return [
-        Verdict(path, problem) if problem else _compare_file(path, (base_lexed[path], head_lexed[path]), policy)
+        Verdict(path, problem) if problem
+        else _compare_file(path, (base_lexed.get(path, missing), head_lexed.get(path, missing)), policy)
         for path, problem in problems.items()
     ]
 
@@ -41,6 +43,8 @@ def verify_diff(repository: Repository, revisions: Revisions, policy: DocstringP
 def _structural_problem(change: FileChange) -> str | None:
     if change.status != "M":
         return f"file status {change.status}: only in-place modifications can be comment-only"
+    if change.mode_changed:
+        return f"file mode changed from {change.modes[0]} to {change.modes[1]}"
     language = language_of(change.path)
     if not (language and language.verifiable):
         return "no verifying lexer for this file type"
@@ -84,22 +88,30 @@ def compare_lexed(base: Lexed, head: Lexed, policy: DocstringPolicy) -> str | No
 
 
 def _code_tokens(lexed: Lexed, policy: DocstringPolicy) -> list[Token]:
-    if policy is DocstringPolicy.CODE:
-        return lexed.tokens
-    kept, after_docstring = [], False
+    return lexed.tokens if policy is DocstringPolicy.CODE else _split_docstrings(lexed)[0]
+
+
+def _split_docstrings(lexed: Lexed) -> tuple[list[Token], dict[int, list[Token]]]:
+    """Code tokens without docstrings (and the line end after each), and each docstring keyed by its position there."""
+    kept: list[Token] = []
+    docstrings: dict[int, list[Token]] = {}
+    after_docstring = False
     for token in lexed.tokens:
-        skip = token.is_docstring or (after_docstring and token.text == "NEWLINE")
-        after_docstring = token.is_docstring
-        if not skip:
+        if token.is_docstring:
+            docstrings.setdefault(len(kept), []).append(token)
+        elif not (after_docstring and token.text == "NEWLINE"):
             kept.append(token)
-    return kept
+        after_docstring = token.is_docstring
+    return kept, docstrings
 
 
 def _docstring_edit(base: Lexed, head: Lexed) -> str | None:
-    remaining = iter(token.text for token in base.tokens if token.is_docstring)
-    for token in head.tokens:
-        if token.is_docstring and token.text not in remaining:
-            return f"head line {token.line}: docstring added or edited; only deleting a docstring is allowed"
+    """Head may keep a docstring exactly where it was, or drop it; nothing else."""
+    base_docstrings = _split_docstrings(base)[1]
+    for position, tokens in _split_docstrings(head)[1].items():
+        original = [token.text for token in base_docstrings.get(position, [])]
+        if [token.text for token in tokens] != original:
+            return f"head line {tokens[0].line}: docstring added, edited or moved; only deleting one is allowed"
     return None
 
 

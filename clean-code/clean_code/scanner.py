@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from .tokens import NEWLINE, NO_GAP, SPACE, Comment, GapRule, Lexed, LexError, Token
 
-WHITESPACE = re.compile(r"[ \t\r\n\f\v ﻿]+")
+WHITESPACE = re.compile(r"[ \t\r\n\f\v\u00a0\u0085\u2028\u2029\ufeff]+")
+LF = re.compile(r"\n")
 WORD = re.compile(r"[\w@]+")
 
 
@@ -25,6 +26,7 @@ class Scanner:
     line_comment_markers: tuple[str, ...] = ("//",)
     block_comments = True
     word_pattern = WORD
+    line_terminator = LF
 
     def __init__(self, text: str):
         self.text = text
@@ -48,16 +50,14 @@ class Scanner:
         match = WHITESPACE.match(self.text, self.pos)
         if not match:
             return False
-        self.widen_gap(NEWLINE if "\n" in match.group() else SPACE)
+        self.widen_gap(NEWLINE if self.line_terminator.search(match.group()) else SPACE)
         self.advance_to(match.end())
         return True
 
     def skip_line_comment(self) -> bool:
         if not self.starts_line_comment():
             return False
-        end = self.text.find("\n", self.pos)
-        end = len(self.text) if end < 0 else end
-        self.add_comment(end)
+        self.add_comment(self.line_end())
         self.widen_gap(SPACE)
         return True
 
@@ -70,7 +70,7 @@ class Scanner:
         end = self.text.find("*/", self.pos + 2)
         if end < 0:
             raise LexError(f"unterminated block comment at line {self.line}")
-        self.widen_gap(NEWLINE if "\n" in self.text[self.pos:end] else SPACE)
+        self.widen_gap(NEWLINE if self.line_terminator.search(self.text, self.pos, end) else SPACE)
         self.add_comment(end + 2)
         return True
 
@@ -104,9 +104,15 @@ class Scanner:
     def literal_end(self) -> int | None:
         return None
 
+    def line_end(self) -> int:
+        terminator = self.line_terminator.search(self.text, self.pos)
+        return terminator.start() if terminator else len(self.text)
+
     def at_line_start(self) -> bool:
-        line_start = self.text.rfind("\n", 0, self.pos) + 1
-        return not self.text[line_start:self.pos].strip()
+        index = self.pos - 1
+        while index >= 0 and self.text[index] in " \t\f\v\ufeff":
+            index -= 1
+        return index < 0 or bool(self.line_terminator.match(self.text, index))
 
     def string_end(self, start: int, style: "StringStyle") -> int:
         """End of a string literal whose opening quote is just before start."""

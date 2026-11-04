@@ -26,31 +26,32 @@ function isEmptyJsxExpression(node) {
   return node.kind === ts.SyntaxKind.JsxExpression && !node.expression;
 }
 
-function normalizeJsxText(text) {
-  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(" ");
+// The JSX transform's whitespace rule: inner lines are trimmed, blank lines dropped, the rest joined by spaces.
+function jsxChildText(raw) {
+  const lines = raw.replace(/\t/g, " ").split(/\r\n|\n|\r/);
+  const lastNonEmpty = lines.reduce((last, line, index) => (/[^ ]/.test(line) ? index : last), -1);
+  return lines
+    .map((line, index) => (index === 0 ? line : line.replace(/^ +/, "")))
+    .map((line, index) => (index === lines.length - 1 ? line : line.replace(/ +$/, "")))
+    .map((line, index) => (line && index !== lastNonEmpty ? `${line} ` : line))
+    .join("");
 }
 
-// Adjacent JSX text runs are merged before normalizing, so deleting a {/* comment */} between them is a no-op.
+// Each JSX text child stays separate: deleting a {/* comment */} between two texts changes the children.
 function collectTokens(source) {
   const tokens = [];
-  const push = (node) => {
-    const trivia = source.text.slice(node.getFullStart(), node.getStart(source));
-    const isJsxText = node.kind === ts.SyntaxKind.JsxText;
-    const previous = tokens[tokens.length - 1];
-    const text = isJsxText ? node.getFullText(source) : node.getText(source);
-    if (isJsxText && previous?.isJsxText) return void (previous.text += text);
-    tokens.push({ text, line: lineOf(source, node.getStart(source)), newline: LINE_BREAK.test(trivia), isJsxText });
-  };
   const visit = (node) => {
     if (isJsDoc(node) || isEmptyJsxExpression(node)) return;
     const children = node.getChildren(source);
     if (children.length > 0) return children.forEach(visit);
-    if (node.getText(source)) push(node);
+    const isJsxText = node.kind === ts.SyntaxKind.JsxText;
+    const text = isJsxText ? jsxChildText(node.getFullText(source)) : node.getText(source);
+    if (!text) return;
+    const trivia = source.text.slice(node.getFullStart(), node.getStart(source));
+    tokens.push([text, lineOf(source, node.getStart(source)), !isJsxText && LINE_BREAK.test(trivia) ? "\n" : ""]);
   };
   visit(source);
-  return tokens
-    .map((token) => [token.isJsxText ? normalizeJsxText(token.text) : token.text, token.line, token.newline ? "\n" : ""])
-    .filter(([text]) => text);
+  return tokens;
 }
 
 function collectComments(source) {

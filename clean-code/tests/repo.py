@@ -16,14 +16,14 @@ class ScratchRepository:
         self._git("config", "user.name", "Test")
         self.repository = Repository(self.root)
 
-    def commit(self, files: dict[str, str | None]) -> str:
+    def commit(self, files: dict[str, str | bytes | None]) -> str:
         for path, text in files.items():
             target = self.root / path
             if text is None:
                 target.unlink()
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text)
+            target.write_bytes(text if isinstance(text, bytes) else text.encode())
         self._git("add", "-A")
         self._git("commit", "-q", "--allow-empty", "-m", "change")
         return self._git("rev-parse", "HEAD").strip()

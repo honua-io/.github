@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -15,12 +16,26 @@ class Language:
     verifiable: bool
 
 
+LONE_CARRIAGE_RETURN = re.compile(r"\r(?!\n)")
+
+
+def _lf_or_crlf_only(lex: Callable[[str], Lexed]) -> Callable[[str], Lexed]:
+    """Python and HCL disagree on what a lone CR ends, so such files are refused rather than guessed at."""
+
+    def lex_checked(text: str) -> Lexed:
+        if LONE_CARRIAGE_RETURN.search(text):
+            raise LexError("lone carriage-return line endings are not supported")
+        return lex(text)
+
+    return lex_checked
+
+
 CSHARP = Language("csharp", lambda text: CSharpScanner(text).lex(), verifiable=True)
 RAZOR = Language("razor", CSHARP.lex, verifiable=False)
 C_FAMILY = Language("c-family", CSHARP.lex, verifiable=False)
-PYTHON = Language("python", lex_python, verifiable=True)
+PYTHON = Language("python", _lf_or_crlf_only(lex_python), verifiable=True)
 TYPESCRIPT = Language("typescript", None, verifiable=True)
-TERRAFORM = Language("terraform", lambda text: HclScanner(text).lex(), verifiable=True)
+TERRAFORM = Language("terraform", _lf_or_crlf_only(lambda text: HclScanner(text).lex()), verifiable=True)
 SHELL = Language("shell", lambda text: ShellScanner(text).lex(), verifiable=False)
 
 LANGUAGE_BY_SUFFIX = {
@@ -41,11 +56,12 @@ def language_of(path: str) -> Language | None:
     return LANGUAGE_BY_SUFFIX.get(PurePosixPath(path).suffix.lower())
 
 
-def lex_files(texts: dict[str, str]) -> dict[str, Lexed | LexError]:
-    """Lexes every source file in texts; files in other languages are left out."""
-    typescript = {path: text for path, text in texts.items() if language_of(path) is TYPESCRIPT}
-    results = lex_typescript_files(typescript)
-    for path, text in texts.items():
+def lex_files(texts: dict[str, str | Exception]) -> dict[str, Lexed | LexError]:
+    """Lexes every source file in texts; files in other languages are left out, unreadable ones are errors."""
+    readable = {path: text for path, text in texts.items() if isinstance(text, str)}
+    results = {path: LexError(str(text)) for path, text in texts.items() if not isinstance(text, str)}
+    results |= lex_typescript_files({path: text for path, text in readable.items() if language_of(path) is TYPESCRIPT})
+    for path, text in readable.items():
         language = language_of(path)
         if language and language.lex:
             results[path] = _lex_one(language, text)

@@ -1,0 +1,58 @@
+# Reusable: decides whether a pull request or default-branch push touches the paths a calling workflow cares
+# about. Jobs gate on its output instead of a workflow-level paths filter, so on an unrelated change they report
+# "skipped", which satisfies a required check, rather than never reporting at all. Callers pin this file by SHA.
+name: relevant changes
+
+on:
+  workflow_call:
+    inputs:
+      patterns-file:
+        description: File in the calling repository of git glob pathspecs, one per line; '#' starts a comment.
+        type: string
+        required: true
+    outputs:
+      relevant:
+        description: "'true' when the change touches a listed path, or for scheduled and manual runs."
+        value: ${{ jobs.match.outputs.relevant }}
+
+permissions:
+  contents: read
+
+jobs:
+  match:
+    name: relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.match.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: match
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PATTERNS_FILE: ${{ inputs.patterns-file }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f "$PATTERNS_FILE" ]; then
+            echo "::error::pattern file '$PATTERNS_FILE' does not exist"
+            exit 1
+          fi
+          patterns=$(cat -- "$PATTERNS_FILE")
+          pathspecs=()
+          while IFS= read -r pattern; do
+            pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+            pattern="${pattern%"${pattern##*[![:space:]]}"}"
+            case "$pattern" in ''|'#'*) continue ;; esac
+            pathspecs+=(":(glob)$pattern")
+          done <<< "$patterns"
+          if [ "${#pathspecs[@]}" -eq 0 ]; then
+            echo "::error::pattern file '$PATTERNS_FILE' lists no paths"
+            exit 1
+          fi
+          if git diff --quiet "$BASE" HEAD -- "${pathspecs[@]}"; then relevant=false; else relevant=true; fi
+          echo "relevant=$relevant" | tee -a "$GITHUB_OUTPUT"

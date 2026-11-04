@@ -1,4 +1,5 @@
-"""G5: added blocks whose copies at head outnumber those at base, so the PR introduced a clone (moves don't count)."""
+"""G5: blocks touched by the PR whose copies at head outnumber those at base, so the PR introduced a clone.
+Moving a block keeps the count, so it is not a clone."""
 
 import re
 from collections import defaultdict
@@ -66,7 +67,7 @@ def _added_windows(context: CheckContext) -> dict[int, list[_Window]]:
         for index, window_hash in lines.windows():
             window = lines.window(change.path, index)
             span = lines.numbers[index:index + BUDGETS.duplicate_lines]
-            if all(number in change.added_lines for number in span) and lines.is_substantial(index):
+            if any(number in change.added_lines for number in span) and lines.is_substantial(index):
                 candidates[window_hash].append(window)
     return candidates
 

@@ -82,5 +82,8 @@ def _parameters(arguments: ast.arguments) -> tuple[Parameter, ...]:
 
 
 def _is_boolean(argument: ast.arg, default: ast.expr | None) -> bool:
-    annotated = isinstance(argument.annotation, ast.Name) and argument.annotation.id == "bool"
+    """Annotated `bool` (also as a quoted forward reference) or defaulting to True/False."""
+    annotation = argument.annotation
+    annotated = (isinstance(annotation, ast.Name) and annotation.id == "bool") or (
+        isinstance(annotation, ast.Constant) and annotation.value == "bool")
     return annotated or (isinstance(default, ast.Constant) and isinstance(default.value, bool))

@@ -41,6 +41,77 @@ class FunctionRatchet(unittest.TestCase):
         self.assertIn("ruff/PLR0913", rule_keys(pull_request.findings({"src/narrow.py": widened})))
 
 
+def csharp_method(signature: str, body_lines: int) -> str:
+    return f"    {signature}\n    {{\n" + numbered_lines(body_lines, "        Step{0}();") + "    }\n"
+
+
+def csharp_class(*methods: str) -> str:
+    return "class Worker\n{\n" + "".join(methods) + "}\n"
+
+
+class Correspondence(unittest.TestCase):
+    """Each head function is judged against the base function its unchanged lines came from."""
+
+    def findings(self, base: dict[str, str], head: dict[str, str]) -> set[str]:
+        pull_request = PullRequest(base)
+        self.addCleanup(pull_request.close)
+        return rule_keys(pull_request.findings(head))
+
+    def test_an_overload_cannot_borrow_a_longer_overloads_baseline(self):
+        long_overload = csharp_method("void Process(int count)", 78)
+        base = csharp_class(csharp_method("void Process(string text)", 57), long_overload)
+        head = csharp_class(csharp_method("void Process(string text)", 59), long_overload)
+        self.assertIn("clean-code/function-length", self.findings({"src/Worker.cs": base}, {"src/Worker.cs": head}))
+
+    def test_a_new_overload_does_not_inherit_flags_or_parameter_budget(self):
+        base = csharp_class(csharp_method("void Process(bool force)", 1), csharp_method("void Run(int a, int b, int c, int d, int e, int f)", 1))
+        head = base.replace("}\n}\n", "}\n" + csharp_method("void Process(string text, bool force)", 1)
+                            + csharp_method("void Run(int a, int b, int c, int d, int e)", 1) + "}\n", 1)
+        found = self.findings({"src/Worker.cs": base}, {"src/Worker.cs": head})
+        self.assertTrue({"clean-code/flag-argument", "clean-code/too-many-parameters"} <= found, found)
+
+    def test_renames_keep_their_baseline(self):
+        base = {"src/legacy.py": python_function("legacy", 68), "src/flags.py": "def run(*, force: bool):\n    return 1\n"}
+        head = {"src/legacy.py": python_function("publish", 68), "src/flags.py": "def run(*, enabled: bool):\n    return 1\n"}
+        found = self.findings(base, head)
+        self.assertFalse({"clean-code/function-length", "clean-code/flag-argument"} & found, found)
+
+    def test_quoted_boolean_annotation_is_a_flag(self):
+        found = self.findings({"README.md": "x\n"}, {"src/work.py": 'def work(*, force: "bool"):\n    return 1\n'})
+        self.assertIn("clean-code/flag-argument", found)
+
+
+class LinterCorrespondence(unittest.TestCase):
+    def findings(self, base: dict[str, str], head: dict[str, str]) -> set[str]:
+        pull_request = PullRequest(base)
+        self.addCleanup(pull_request.close)
+        return rule_keys(pull_request.findings(head))
+
+    def test_a_violation_moving_between_same_named_methods_is_new(self):
+        legacy = "class Legacy:\n    def process(\n        self, a, b, c, d, e,\n    ):\n        return a\n"
+        fresh = "class New:\n    def process(\n        self, a, b, c, d,\n    ):\n        return a\n"
+        head = legacy.replace("d, e,", "d,") + fresh.replace("c, d,", "c, d, e,")
+        self.assertIn("ruff/PLR0913", self.findings({"src/m.py": legacy + fresh}, {"src/m.py": head}))
+
+    def test_eslint_violation_moving_between_methods_is_new(self):
+        base = "export class A {\n  run(\n    a: number, b: number, c: number, d: number, e: number,\n  ) { return a; }\n}\n" \
+               "export class B {\n  run(\n    a: number, b: number, c: number, d: number,\n  ) { return a; }\n}\n"
+        head = base.replace("d: number, e: number,", "d: number,", 1).replace(
+            "    a: number, b: number, c: number, d: number,\n  ) { return a; }\n}\n",
+            "    a: number, b: number, c: number, d: number, e: number,\n  ) { return a; }\n}\n")
+        self.assertIn("eslint/max-params", self.findings({"src/m.ts": base}, {"src/m.ts": head}))
+
+    def test_a_worsened_measure_is_new_and_a_renamed_parameter_is_not(self):
+        base = "def wide(\n    a, b, c, d, e,\n):\n    return b\n"
+        self.assertIn("ruff/PLR0913", self.findings({"src/w.py": base}, {"src/w.py": base.replace("e,", "e, f,")}))
+        self.assertNotIn("ruff/PLR0913", self.findings({"src/w.py": base}, {"src/w.py": base.replace("a, b", "alpha, b")}))
+
+    def test_renaming_a_typescript_parameter_is_not_new(self):
+        base = "export function wide(a: number, b: number, c: number, d: number, e: number) {\n  return b;\n}\n"
+        renamed = base.replace("(a: number", "(alpha: number")
+        self.assertNotIn("eslint/max-params", self.findings({"src/w.ts": base}, {"src/w.ts": renamed}))
+
+
 class DuplicationRatchet(unittest.TestCase):
     def setUp(self):
         self.block = numbered_lines(16, "value_{0} = compute({0}, offset_{0}, scale)")
@@ -56,6 +127,12 @@ class DuplicationRatchet(unittest.TestCase):
 
     def test_copying_a_block_is_a_new_clone(self):
         self.assertIn("clean-code/duplication", self.keys({"src/c.py": "keep = 1\n" + self.block}))
+
+    def test_completing_a_clone_with_one_line_is_new(self):
+        partial = "\n".join(self.block.splitlines()[:15]) + "\n"
+        pull_request = PullRequest({"src/a.py": self.block, "src/b.py": partial})
+        self.addCleanup(pull_request.close)
+        self.assertIn("clean-code/duplication", rule_keys(pull_request.findings({"src/b.py": self.block})))
 
     def test_the_same_lines_in_another_language_are_not_a_clone(self):
         csharp = numbered_lines(16, "value_{0} = compute({0}, offset_{0}, scale);")

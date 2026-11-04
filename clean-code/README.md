@@ -4,7 +4,7 @@ Shared Clean Code tooling for honua-io repositories. The review rubric every rep
 
 ## PR check
 
-`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It is a ratchet: it reports only what the PR makes worse, so existing code never fails it. Comment rules judge added lines. Function rules compare each touched function with the same-named one at base: a function may not newly exceed a budget or grow while over it, nor gain a flag parameter. ruff and ESLint run on both base and head copies of the changed files, and a head finding counts only when base has no finding of the same rule on the same line text. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
+`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It is a ratchet: it reports only what the PR makes worse, so existing code never fails it. Comment rules judge added lines. Everything else compares head with base through the diff: each unchanged head line maps to the base line it came from, and each touched head function maps to the base function holding most of its unchanged lines, so renames, overloads and edits elsewhere in the file don't confuse the comparison. A touched function may not exceed a budget by more than its base counterpart did, nor gain a boolean parameter; a function without a counterpart is new. ruff and ESLint run on base and head copies of the changed files: a function-level finding (parameters, statements, complexity) is new unless the counterpart had it with at least the same measure, and a line-level finding is new unless its unchanged base line had it. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
 
 ```yaml
 # .github/workflows/clean-code.yml in a calling repository
@@ -72,7 +72,7 @@ jobs:
 | Cyclomatic / cognitive complexity | 10 / 15 | G30 |
 | Nesting depth | 2 | G34 |
 
-Duplication: every run of 15 significant lines (blank, comment-only, punctuation-only and import/using lines are skipped) that the PR adds is hashed per language and counted across the repository at base and at head. More copies at head than at base is a clone the PR introduced; a moved block is not.
+Duplication: every run of 15 significant lines (blank, comment-only, punctuation-only and import/using lines are skipped) that touches an added line is hashed per language and counted across the repository at base and at head. More copies at head than at base is a clone the PR introduced, including one completed by a single line; a moved block is not.
 
 Skipped as generated or vendored: `node_modules`, `dist`, `build`, `vendor`, `third_party`, `wwwroot/lib`, `Migrations`, `generated`, snapshots, `*.min.*`, `*.bundle.*`, hashed bundles under `assets/`, `*.d.ts`, `*.g.cs`, `*.Designer.cs`, protobuf output, symlinks and submodules; callers add globs with `exclude`.
 

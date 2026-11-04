@@ -1,11 +1,12 @@
-"""G30, F1 and F3 as a ratchet: a touched function may not newly exceed a budget or gain a flag parameter."""
+"""G30, F1 and F3 as a ratchet: a touched function may not exceed a budget further than its base counterpart did,
+nor gain a boolean flag parameter."""
 
-from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from ..budgets import BUDGETS
 from ..context import CheckContext
+from ..correspondence import base_counterpart
 from ..findings import Finding, Location
 from ..git import FileChange
 from ..lexing import CSHARP, PYTHON, TYPESCRIPT, language_of
@@ -18,23 +19,26 @@ FLAG_ARGUMENT_LANGUAGES = frozenset({CSHARP.name, TYPESCRIPT.name, PYTHON.name})
 
 @dataclass(frozen=True)
 class _FunctionChange:
-    """A function the PR touches, the same-named functions at base, and the first added line inside it."""
+    """A function the PR touches, the base function it came from (None when new), and its first added line."""
 
     head: Function
-    base: tuple[Function, ...]
+    base: Function | None
     location: Location
 
     @property
     def base_length(self) -> int:
-        return max((function.length for function in self.base), default=0)
+        return self.base.length if self.base else 0
 
     @property
     def base_parameter_count(self) -> int:
-        return max((len(function.parameters) for function in self.base), default=0)
+        return len(self.base.parameters) if self.base else 0
 
-    @property
-    def base_flags(self) -> set[str]:
-        return {parameter.name for function in self.base for parameter in function.parameters if parameter.is_boolean}
+    def added_flags(self) -> list[str]:
+        """Boolean parameters beyond the base count, preferring names the base did not have."""
+        base_flags = [parameter.name for parameter in self.base.parameters if parameter.is_boolean] if self.base else []
+        head_flags = [parameter.name for parameter in self.head.parameters if parameter.is_boolean]
+        new_names = [name for name in head_flags if name not in base_flags]
+        return list(dict.fromkeys(new_names + head_flags))[: max(0, len(head_flags) - len(base_flags))]
 
 
 def check_functions(context: CheckContext) -> Iterator[Finding]:
@@ -46,13 +50,12 @@ def check_functions(context: CheckContext) -> Iterator[Finding]:
 
 def _file_findings(change: FileChange, lexed: Lexed, base: Lexed | None) -> Iterator[Finding]:
     language = language_of(change.path).name
-    base_by_name: dict[str, list[Function]] = defaultdict(list)
-    for function in base.functions if base else []:
-        base_by_name[function.name].append(function)
+    base_functions = base.functions if base else []
     for function in lexed.functions:
         added = [line for line in range(function.start, function.end + 1) if line in change.added_lines]
         if added:
-            touched = _FunctionChange(function, tuple(base_by_name[function.name]), Location(change.path, added[0]))
+            counterpart = base_counterpart(function, change, base_functions)
+            touched = _FunctionChange(function, counterpart, Location(change.path, added[0]))
             yield from _length_findings(touched)
             yield from _parameter_findings(touched, language)
 
@@ -76,7 +79,6 @@ def _parameter_findings(touched: _FunctionChange, language: str) -> Iterator[Fin
         yield Finding.of("clean-code/too-many-parameters", touched.location, message)
     if language not in FLAG_ARGUMENT_LANGUAGES:
         return
-    for parameter in head.parameters:
-        if parameter.is_boolean and parameter.name not in touched.base_flags:
-            message = f"{head.name}({parameter.name}): split into two intention-revealing functions"
-            yield Finding.of("clean-code/flag-argument", touched.location, message)
+    for name in touched.added_flags():
+        message = f"{head.name}({name}): split into two intention-revealing functions"
+        yield Finding.of("clean-code/flag-argument", touched.location, message)

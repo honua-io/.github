@@ -1,10 +1,11 @@
-"""Runs ruff and ESLint on the PR's files at base and at head; a head finding is new unless base has it too."""
+"""Runs ruff and ESLint on the PR's files at base and at head. A head finding is new unless the corresponding base
+function had it at least as badly (function-level rules) or the unchanged line had it at base (line-level rules)."""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
-from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,8 +13,11 @@ from pathlib import Path
 from ..budgets import BUDGETS
 from ..catalog import RULES
 from ..context import CheckContext
+from ..correspondence import base_counterpart, enclosing_function
 from ..findings import Finding, Location
+from ..git import FileChange
 from ..lexing import PYTHON, TYPESCRIPT, language_of
+from ..tokens import Function, Lexed
 
 TOOL_DIRECTORY = Path(__file__).resolve().parents[2]
 
@@ -66,28 +70,79 @@ def check_with_eslint(context: CheckContext) -> list[Finding]:
     return _introduced_findings(context, ESLINT)
 
 
+FUNCTION_LEVEL_RULES = frozenset({
+    "ruff/PLR0913", "ruff/PLR0915", "ruff/C901",
+    "eslint/max-params", "eslint/complexity", "eslint/sonarjs/cognitive-complexity",
+})
+MEASURE = re.compile(r"\d+")
+
+
 def _introduced_findings(context: CheckContext, tool: _Tool) -> list[Finding]:
-    """Head findings left after cancelling each against a base finding of the same rule on the same line text."""
     paths = [change.path for change in context.changes if language_of(change.path).name == tool.language]
     head_texts = {path: context.head_texts[path] for path in paths if path in context.head_texts}
     if not head_texts:
         return []
     base_texts = {path: context.base_texts[path] for path in paths if path in context.base_texts}
-    existing = Counter(_anchor(finding, base_texts) for finding in _run(tool, base_texts))
+    base_findings = _by_path(_run(tool, base_texts))
+    changes = {change.path: change for change in context.changes}
     introduced = []
-    for finding in _run(tool, head_texts):
-        anchor = _anchor(finding, head_texts)
-        if existing[anchor]:
-            existing[anchor] -= 1
-        else:
-            introduced.append(finding)
+    for path, findings in _by_path(_run(tool, head_texts)).items():
+        revisions = _FileRevisions(changes[path], context, base_findings.get(path, []))
+        introduced += [finding for finding in findings if not revisions.consume_existing(finding)]
     return introduced
 
 
-def _anchor(finding: Finding, texts: dict[str, str]) -> tuple[str, str, str]:
-    lines = texts[finding.location.path].split("\n")
-    line_text = lines[finding.location.line - 1].strip() if finding.location.line <= len(lines) else ""
-    return finding.rule.key, finding.location.path, line_text
+class _FileRevisions:
+    """One file's functions at head and base, and the base findings not yet matched to a head finding."""
+
+    def __init__(self, change: FileChange, context: CheckContext, base_findings: list[Finding]):
+        self.change = change
+        self.head_functions = _functions(context.lexed.get(change.path))
+        self.base_functions = _functions(context.base_lexed.get(change.path))
+        self.unmatched = _grouped(base_findings, lambda finding: finding.rule.key)
+        self._counterparts: dict[Function, Function | None] = {}
+
+    def consume_existing(self, finding: Finding) -> bool:
+        """True, and the base match is used up, when base already had this finding (or a worse one)."""
+        candidates = self.unmatched.get(finding.rule.key, [])
+        match = next((base for base in candidates if self._corresponds(finding, base)), None)
+        if match is not None:
+            candidates.remove(match)
+        return match is not None
+
+    def _corresponds(self, finding: Finding, base: Finding) -> bool:
+        head_function = enclosing_function(finding.location.line, self.head_functions)
+        if finding.rule.key in FUNCTION_LEVEL_RULES and head_function is not None:
+            counterpart = self._counterpart(head_function)
+            same_function = counterpart is not None and enclosing_function(base.location.line, self.base_functions) is counterpart
+            return same_function and _measure(base) >= _measure(finding)
+        return self.change.line_map.base_line(finding.location.line) == base.location.line
+
+    def _counterpart(self, head_function: Function) -> Function | None:
+        if head_function not in self._counterparts:
+            self._counterparts[head_function] = base_counterpart(head_function, self.change, self.base_functions)
+        return self._counterparts[head_function]
+
+
+def _functions(lexed: Lexed | None) -> list[Function]:
+    return lexed.functions if lexed else []
+
+
+def _measure(finding: Finding) -> int:
+    """The measured value tools put first in their messages, e.g. 'Too many arguments (6 > 4)'."""
+    measured = MEASURE.search(finding.message)
+    return int(measured.group()) if measured else 0
+
+
+def _grouped(findings: list[Finding], key: Callable[[Finding], str]) -> dict[str, list[Finding]]:
+    grouped: dict[str, list[Finding]] = {}
+    for finding in findings:
+        grouped.setdefault(key(finding), []).append(finding)
+    return grouped
+
+
+def _by_path(findings: list[Finding]) -> dict[str, list[Finding]]:
+    return _grouped(findings, lambda finding: finding.location.path)
 
 
 def _run(tool: _Tool, texts: dict[str, str]) -> list[Finding]:

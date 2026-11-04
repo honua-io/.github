@@ -5,6 +5,7 @@ on:
     paths:
       - "clean-code/**"
       - ".github/workflows/clean-code*.yml"
+      - ".github/workflows/relevant-changes.yml"
   push:
     branches: [main]
     paths:

@@ -27,12 +27,13 @@ class RelevantChanges(unittest.TestCase):
         self.addCleanup(self.scratch.close)
         self.base = self.scratch.commit({"src/app.py": "x = 1\n", "docs/readme.md": "doc\n"})
 
-    def run_match(self, patterns: str | None, base: str) -> tuple[int, str]:
+    def run_match(self, patterns: str | None, base: str, path_prefix: str = "") -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as scratch:
             output, patterns_file = Path(scratch, "output"), Path(scratch, "patterns.txt")
             if patterns is not None:
                 patterns_file.write_text(patterns)
-            env = {**os.environ, "BASE": base, "PATTERNS_FILE": str(patterns_file), "GITHUB_OUTPUT": str(output)}
+            path = f"{path_prefix}:{os.environ['PATH']}" if path_prefix else os.environ["PATH"]
+            env = {**os.environ, "PATH": path, "BASE": base, "PATTERNS_FILE": str(patterns_file), "GITHUB_OUTPUT": str(output)}
             done = subprocess.run(["bash", "-e", "-c", match_script()], cwd=self.scratch.root, env=env,
                                   capture_output=True, text=True, check=False)
             return done.returncode, output.read_text() if output.exists() else ""
@@ -53,6 +54,17 @@ class RelevantChanges(unittest.TestCase):
                 code, output = self.run_match(patterns, self.base)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(output, "")
+
+
+    def test_a_read_that_fails_part_way_gives_no_answer(self):
+        self.scratch.commit({"src/app.py": "x = 2\n"})
+        with tempfile.TemporaryDirectory() as fake_bin:
+            failing_cat = Path(fake_bin, "cat")
+            failing_cat.write_text("#!/usr/bin/env bash\necho 'never/**'\nexit 2\n")
+            failing_cat.chmod(0o755)
+            code, output = self.run_match("never/**\nsrc/**\n", self.base, path_prefix=fake_bin)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(output, "")
 
 
 if __name__ == "__main__":

@@ -38,17 +38,18 @@ jobs:
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ ! -f "$PATTERNS_FILE" ] || [ ! -r "$PATTERNS_FILE" ]; then
-            echo "::error::cannot read pattern file '$PATTERNS_FILE'"
+          if [ ! -f "$PATTERNS_FILE" ]; then
+            echo "::error::pattern file '$PATTERNS_FILE' does not exist"
             exit 1
           fi
+          patterns=$(cat -- "$PATTERNS_FILE")
           pathspecs=()
-          while IFS= read -r pattern || [ -n "$pattern" ]; do
+          while IFS= read -r pattern; do
             pattern="${pattern#"${pattern%%[![:space:]]*}"}"
             pattern="${pattern%"${pattern##*[![:space:]]}"}"
             case "$pattern" in ''|'#'*) continue ;; esac
             pathspecs+=(":(glob)$pattern")
-          done < "$PATTERNS_FILE"
+          done <<< "$patterns"
           if [ "${#pathspecs[@]}" -eq 0 ]; then
             echo "::error::pattern file '$PATTERNS_FILE' lists no paths"
             exit 1

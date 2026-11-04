@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from .tokens import Comment, Function, GapRule, Lexed, LexError, Token
+from .tokens import Comment, Function, GapRule, Lexed, LexError, Parameter, Token
 
 TS_LEXER = Path(__file__).resolve().parent.parent / "ts_lexer.cjs"
 TYPESCRIPT_GAPS = GapRule(newline_matters=True, glue_matters=False)
@@ -29,5 +29,11 @@ def _to_lexed(result: dict) -> Lexed | LexError:
         TYPESCRIPT_GAPS,
         tokens=[Token(text, line, gap) for text, line, gap in result["tokens"]],
         comments=[Comment(line, text) for line, text in result["comments"]],
-        functions=[Function(name, start, end) for name, start, end in result["functions"]],
+        functions=[_function(description) for description in result["functions"]],
     )
+
+
+def _function(description: list) -> Function:
+    name, start, end, parameters, is_constructor = description
+    described = tuple(Parameter(parameter_name, is_boolean) for parameter_name, is_boolean in parameters)
+    return Function(name, start, end, described, is_constructor)

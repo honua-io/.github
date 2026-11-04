@@ -66,7 +66,7 @@ class Repository:
         diff = self.git("diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--dst-prefix=b/", revisions.base, revisions.head)
         added: dict[str, set[int]] = {}
         current: set[int] = set()
-        for line in diff.splitlines():
+        for line in diff.split("\n"):
             if line.startswith("+++ "):
                 current = added.setdefault(line[6:], set()) if line.startswith("+++ b/") else set()
                 continue

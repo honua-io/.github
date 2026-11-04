@@ -1,0 +1,2 @@
+Foo();
+var items = new[] { };

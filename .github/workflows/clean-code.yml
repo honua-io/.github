@@ -1,0 +1,60 @@
+# Reusable PR check: the Clean Code rules in clean-code/ (see its README), judged only on the lines a PR adds.
+# Callers pin this file by SHA; the job checks out clean-code/ at that same commit.
+name: Clean code
+
+on:
+  workflow_call:
+    inputs:
+      exclude:
+        description: Newline-separated globs of extra paths to skip. Generated and vendored paths are skipped already.
+        type: string
+        default: ""
+      xml-docs:
+        description: "forbid (application code) or public-summary (published SDKs: one-line <summary> on public members)."
+        type: string
+        default: forbid
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Clean code
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the PR merge commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check out the clean-code tool at this workflow's commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .clean-code-tool
+          sparse-checkout: clean-code
+          persist-credentials: false
+      - name: Install the pinned linters
+        run: .clean-code-tool/clean-code/install.sh "$RUNNER_TEMP/clean-code-venv" >> "$GITHUB_PATH"
+      - name: Check the added lines
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          EXCLUDES: ${{ inputs.exclude }}
+          XML_DOCS: ${{ inputs.xml-docs }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          excludes=()
+          while IFS= read -r glob; do [ -n "$glob" ] && excludes+=(--exclude "$glob"); done <<< "$EXCLUDES"
+          python3 -I .clean-code-tool/clean-code/check_clean_code.py --base HEAD^1 --head HEAD \
+            --pr-body "$RUNNER_TEMP/pr-body.md" --xml-docs "$XML_DOCS" "${excludes[@]}"
+      - name: Verify the declared comment-only change
+        if: "contains(github.event.pull_request.body, 'clean-code: comment-only')"
+        env:
+          DOCSTRING_REMOVAL: "${{ contains(github.event.pull_request.body, 'clean-code: docstring-removal') }}"
+        run: |
+          flags=()
+          [ "$DOCSTRING_REMOVAL" = true ] && flags+=(--allow-docstring-removal)
+          python3 -I .clean-code-tool/clean-code/verify_comment_only.py --base HEAD^1 --head HEAD "${flags[@]}"

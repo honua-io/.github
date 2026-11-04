@@ -28,6 +28,9 @@ class ScratchRepository:
         self._git("commit", "-q", "--allow-empty", "-m", "change")
         return self._git("rev-parse", "HEAD").strip()
 
+    def reset(self, revision: str) -> None:
+        self._git("reset", "-q", "--hard", revision)
+
     def close(self) -> None:
         self._directory.cleanup()
 

@@ -24,10 +24,18 @@ class Comment:
 
 
 @dataclass(frozen=True)
+class Parameter:
+    name: str
+    is_boolean: bool
+
+
+@dataclass(frozen=True)
 class Function:
     name: str
     start: int
     end: int
+    parameters: tuple[Parameter, ...] = ()
+    is_constructor: bool = False
 
     @property
     def length(self) -> int:
@@ -50,12 +58,19 @@ class Lexed:
     functions: list[Function] = field(default_factory=list)
 
 
+OPERATOR_CHARACTERS = frozenset("+-*/%&|^!=<>?:.~")
+
+
 def _char_class(char: str) -> str:
-    return "word" if char.isalnum() or char in "_@$" else "punct"
+    if char.isalnum() or char in "_@$":
+        return "word"
+    return "operator" if char in OPERATOR_CHARACTERS else "separator"
 
 
 def _glues(left: str, right: str) -> bool:
-    return _char_class(left[-1]) == _char_class(right[0])
+    """Two words, or two operator characters, would read as one token if the gap between them went."""
+    left_class = _char_class(left[-1])
+    return left_class != "separator" and left_class == _char_class(right[0])
 
 
 def _significant_gap(rule: GapRule, previous: Token | None, token: Token) -> str:

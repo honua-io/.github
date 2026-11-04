@@ -1,13 +1,94 @@
 # clean-code
 
-Shared Clean Code tooling for honua-io repositories.
+Shared Clean Code tooling for honua-io repositories. The review rubric every repository's AGENTS.md points to is [RUBRIC.md](RUBRIC.md).
+
+## PR check
+
+`.github/workflows/clean-code.yml` runs on every pull request in the calling repository. It judges only the lines and files the PR adds or changes, so existing code never fails it; it is a ratchet. Each finding is an annotation titled with its Clean Code smell code (see the rubric: N, F, C, G, T; Ch10 is chapter 10, small classes).
+
+```yaml
+# .github/workflows/clean-code.yml in a calling repository
+name: Clean code
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  clean-code:
+    uses: honua-io/.github/.github/workflows/clean-code.yml@<sha>
+    with:
+      xml-docs: forbid        # or public-summary for published SDKs
+      exclude: |              # optional, extra globs to skip
+        docs/examples/**
+```
+
+`edited` re-runs the check when the PR body changes, so adding an exception takes effect without a push.
+
+### Rules
+
+| Smell | Rule | Finds | Languages | Severity |
+| --- | --- | --- | --- | --- |
+| C1 | `clean-code/history-comment` | Change history in a comment | all source | block |
+| C1 | `clean-code/reviewer-note` | Reviewer note in a comment | all source | block |
+| C1 | `clean-code/ticket-reference` | Ticket or PR reference in a comment | all source | block |
+| C1 | `clean-code/xml-doc` | XML doc comment in application code | C# | block |
+| C3 | `clean-code/redundant-comment` | Comment restates the next line of code | all source | advisory |
+| C5 | `clean-code/commented-out-code` | Commented-out code | C#, Terraform, shell | block |
+| C5 | `eslint/sonarjs/no-commented-code` | Commented-out code | TS/JS | block |
+| C5 | `ruff/ERA001` | Commented-out code | Python | block |
+| Ch10 | `clean-code/large-file-growth` | File over 800 lines grew | all source | block |
+| Ch10 | `clean-code/new-file-size` | New file over 400 lines | all source | block |
+| F1 | `clean-code/too-many-parameters` | More than 4 parameters | C# | block |
+| F1 | `eslint/max-params` | More than 4 parameters | TS/JS | block |
+| F1 | `ruff/PLR0913` | More than 4 parameters | Python | block |
+| F3 | `clean-code/flag-argument` | Boolean flag parameter | C#, TS/JS | block |
+| F3 | `ruff/FBT001` | Boolean flag parameter | Python | block |
+| F3 | `ruff/FBT002` | Boolean flag parameter with a default | Python | block |
+| F3 | `ruff/FBT003` | Boolean positional argument in a call | Python | advisory |
+| G25 | `eslint/no-magic-numbers` | Magic number | TS/JS | advisory |
+| G25 | `eslint/sonarjs/no-duplicate-string` | Duplicated string literal | TS/JS | advisory |
+| G25 | `ruff/PLR2004` | Magic number | Python | advisory |
+| G30 | `clean-code/function-length` | Function over 60 lines | Python, C#, TS/JS | block |
+| G30 | `eslint/complexity` | Cyclomatic complexity over 10 | TS/JS | advisory |
+| G30 | `eslint/sonarjs/cognitive-complexity` | Cognitive complexity over 15 | TS/JS | advisory |
+| G30 | `ruff/C901` | Cyclomatic complexity over 10 | Python | advisory |
+| G30 | `ruff/PLR0915` | Too many statements | Python | advisory |
+| G34 | `eslint/max-depth` | Nesting deeper than 2 | TS/JS | advisory |
+| G5 | `clean-code/duplication` | Duplicated block (15+ lines, 100+ tokens) | all source | block |
+| G5 | `eslint/sonarjs/no-identical-functions` | Identical functions | TS/JS | block |
+
+`block` findings fail the job; `advisory` findings are notices. One tool owns each rule per language: ruff for Python, ESLint with `eslint-plugin-sonarjs` for TS/JS, and the lexers in `clean_code/` for C#, Terraform, shell and the cross-language rules. Function length for TS/JS comes from the TypeScript parser rather than ESLint, so `describe`/`it` callbacks don't count as long functions. C# has no compiler-backed analyzer here; that would need a build, and this check runs on changed files only.
+
+### Budgets
+
+`budgets.json` holds every threshold; `eslint.config.mjs` and the ruff invocation read it.
+
+| Budget | Value | Rule |
+| --- | --- | --- |
+| Function length | 60 lines (the rubric's soft target is about 40) | G30 |
+| Parameters | 4 (constructors exempt in C#, for dependency injection) | F1 |
+| New file | 400 lines | Ch10 |
+| Large file that may not grow | 800 lines | Ch10 |
+| Duplicated block | 15 consecutive significant lines and 100 tokens | G5 |
+| Cyclomatic / cognitive complexity | 10 / 15 | G30 |
+| Nesting depth | 2 | G34 |
+
+Duplication: every run of 15 significant lines (blank, comment-only, punctuation-only and import/using lines are skipped) that the PR adds is hashed and compared with every file of the same language at head. A run that also appears elsewhere, including twice in the PR, is a clone the PR introduced; a moved block is not, because its old copy is gone at head.
+
+Comments (C1): bare `#123`, `SEC-12`, `honua-*#12`, honua-io issue or PR links, "PR 12"/"issue 12", history wording ("previously", "no longer", "used to be", "was changed", "now we") and reviewer notes. References to external upstreams such as `dotnet/runtime#12345` are allowed: they explain a workaround. `xml-docs: forbid` flags every new `///` line; `public-summary` allows only a one-line `/// <summary>` and flags the rest.
+
+### Exceptions and declarations in the PR body
+
+- `quality-exception: <reason>` turns blocking findings into warnings. The job passes, and the summary logs the reason with every finding. A marker without a reason does nothing.
+- `clean-code: comment-only` also runs the comment-only verifier below and fails unless the diff is proven comment- and whitespace-only. Add `clean-code: docstring-removal` to let it delete Python docstrings.
 
 ## Comment-only diff verifier
 
 Proves that a diff changes only comments and whitespace, so a mass comment cleanup can merge on proof instead of line-by-line review.
 
 ```sh
-npm ci --prefix clean-code --ignore-scripts      # the TypeScript parser, once
+clean-code/install.sh /tmp/clean-code-venv      # the pinned linters, once
 python3 -I clean-code/verify_comment_only.py --repo <repo> --base origin/trunk --head HEAD
 ```
 
@@ -27,7 +108,8 @@ Python docstrings are code. `--allow-docstring-removal` lets a PR delete docstri
 ## Tests
 
 ```sh
-cd clean-code && npm ci --ignore-scripts && python3 -m unittest discover -s tests -t .
+cd clean-code && PATH="$(./install.sh /tmp/clean-code-venv):$PATH" python3 -m unittest discover -s tests -t .
 ```
 
+Each `tests/fixtures/rules/<rule>/` holds `bad.*` files that must trigger the rule and `good.*` files that must not.
 Each `tests/fixtures/comment_only/<case>/` holds a `base` and `head` file. `same-*` cases must verify as comment-only, `diff-*` cases must fail, and a `-removable` suffix runs with docstring removal allowed.

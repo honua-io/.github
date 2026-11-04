@@ -1,0 +1,11 @@
+{
+  "functionLines": 60,
+  "parameters": 4,
+  "newFileLines": 400,
+  "largeFileLines": 800,
+  "duplicateLines": 15,
+  "duplicateTokens": 100,
+  "complexity": 10,
+  "cognitiveComplexity": 15,
+  "nestingDepth": 2
+}

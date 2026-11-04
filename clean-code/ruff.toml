@@ -1,0 +1,9 @@
+[lint]
+select = ["C901", "ERA001", "FBT", "PLR0913", "PLR0915", "PLR2004"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.per-file-ignores]
+"**/{test_*,*_test,conftest}.py" = ["FBT", "PLR0913", "PLR2004"]
+"**/tests/**" = ["FBT", "PLR0913", "PLR2004"]

@@ -1,8 +1,11 @@
 {
   "name": "honua-clean-code",
   "private": true,
-  "description": "TypeScript parser for the clean-code check",
+  "description": "TypeScript parser and ESLint rules for the clean-code check",
   "dependencies": {
+    "@typescript-eslint/parser": "8.72.1",
+    "eslint": "10.14.0",
+    "eslint-plugin-sonarjs": "4.2.2",
     "typescript": "5.9.3"
   }
 }

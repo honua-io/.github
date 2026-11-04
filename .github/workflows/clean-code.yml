@@ -50,11 +50,3 @@ jobs:
           while IFS= read -r glob; do [ -n "$glob" ] && excludes+=(--exclude "$glob"); done <<< "$EXCLUDES"
           python3 -I .clean-code-tool/clean-code/check_clean_code.py --base HEAD^1 --head HEAD \
             --pr-body "$RUNNER_TEMP/pr-body.md" --xml-docs "$XML_DOCS" "${excludes[@]}"
-      - name: Verify the declared comment-only change
-        if: "contains(github.event.pull_request.body, 'clean-code: comment-only')"
-        env:
-          DOCSTRING_REMOVAL: "${{ contains(github.event.pull_request.body, 'clean-code: docstring-removal') }}"
-        run: |
-          flags=()
-          [ "$DOCSTRING_REMOVAL" = true ] && flags+=(--allow-docstring-removal)
-          python3 -I .clean-code-tool/clean-code/verify_comment_only.py --base HEAD^1 --head HEAD "${flags[@]}"

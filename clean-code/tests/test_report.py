@@ -5,7 +5,8 @@ from pathlib import Path
 
 from clean_code.catalog import RULES, markdown_table
 from clean_code.findings import Finding, Location
-from clean_code.report import Report, quality_exceptions
+from clean_code.comment_only import Verdict
+from clean_code.report import Report, declarations, quality_exceptions
 
 TOOL_DIRECTORY = Path(__file__).resolve().parents[1]
 BLOCKING = Finding.of("clean-code/ticket-reference", Location("src/a.cs", 3), "'#12': move it")
@@ -33,6 +34,17 @@ class QualityException(unittest.TestCase):
 
     def test_annotations_carry_the_smell_code(self):
         self.assertIn("title=C1 Ticket or PR reference in a comment::", Report([BLOCKING], []).annotations()[0])
+
+
+class Declarations(unittest.TestCase):
+    def test_declarations_count_only_on_their_own_line(self):
+        body = "This PR is a `clean-code: comment-only` cleanup.\nclean-code: docstring-removal\n"
+        self.assertEqual(declarations(body), {"docstring-removal"})
+
+    def test_a_disproved_comment_only_claim_fails_even_under_an_exception(self):
+        report = Report([], ["bulk cleanup"], comment_only_verdicts=[Verdict("a.cs", "code differs")])
+        self.assertFalse(report.passed)
+        self.assertIn("**not proven** for 1 files", report.summary())
 
 
 class CatalogConsistency(unittest.TestCase):

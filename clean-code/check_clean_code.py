@@ -10,9 +10,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from clean_code.check import run_checks
+from clean_code.comment_only import DocstringPolicy, Verdict, verify_diff
 from clean_code.context import CheckContext, CheckOptions, XmlDocPolicy
 from clean_code.git import Repository, Revisions
-from clean_code.report import Report, quality_exceptions
+from clean_code.report import Report, declarations, quality_exceptions
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -33,11 +34,20 @@ def main(argv: list[str]) -> int:
     context = CheckContext(Repository(arguments.repo), Revisions(arguments.base, arguments.head), options)
     pr_body = arguments.pr_body.read_text() if arguments.pr_body else ""
     report = Report(run_checks(context), quality_exceptions(pr_body), context.unchecked)
+    report.comment_only_verdicts = _declared_comment_only(context, declarations(pr_body))
     print("\n".join(report.annotations()))
     _write_summary(report.summary())
     if arguments.json:
         arguments.json.write_text(json.dumps(_as_json(report), indent=2))
     return 0 if report.passed else 1
+
+
+def _declared_comment_only(context: CheckContext, declared: set[str]) -> list[Verdict] | None:
+    """Runs the comment-only verifier when the PR body declares `clean-code: comment-only`."""
+    if "comment-only" not in declared:
+        return None
+    policy = DocstringPolicy.REMOVABLE if "docstring-removal" in declared else DocstringPolicy.CODE
+    return verify_diff(context.repository, context.revisions, policy)
 
 
 def _write_summary(summary: str) -> None:

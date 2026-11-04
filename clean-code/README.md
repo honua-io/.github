@@ -81,7 +81,7 @@ Comments (C1): bare `#123`, `SEC-12`, `honua-*#12`, honua-io issue or PR links, 
 ### Exceptions and declarations in the PR body
 
 - `quality-exception: <reason>` turns blocking findings into warnings. The job passes, and the summary logs the reason with every finding. A marker without a reason does nothing.
-- `clean-code: comment-only` also runs the comment-only verifier below and fails unless the diff is proven comment- and whitespace-only. Add `clean-code: docstring-removal` to let it delete Python docstrings.
+- A line `clean-code: comment-only` also runs the comment-only verifier below and fails unless the diff is proven comment- and whitespace-only; a `quality-exception` does not waive that. A second line `clean-code: docstring-removal` lets it delete Python docstrings. Each declaration must be alone on its line, so prose that mentions one does not trigger it.
 
 ## Comment-only diff verifier
 

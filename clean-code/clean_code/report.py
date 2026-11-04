@@ -3,9 +3,11 @@
 import re
 from dataclasses import dataclass, field
 
+from .comment_only import Verdict
 from .findings import Finding
 
 QUALITY_EXCEPTION = re.compile(r"^\s*quality-exception:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE)
+DECLARATION = re.compile(r"^\s*clean-code:\s*([\w-]+)\s*$", re.IGNORECASE | re.MULTILINE)
 SUMMARY_ROW_LIMIT = 200
 
 
@@ -13,19 +15,29 @@ def quality_exceptions(pr_body: str) -> list[str]:
     return QUALITY_EXCEPTION.findall(pr_body or "")
 
 
+def declarations(pr_body: str) -> set[str]:
+    """Lines such as `clean-code: comment-only`, each alone on its line; prose mentioning them does not count."""
+    return {name.lower() for name in DECLARATION.findall(pr_body or "")}
+
+
 @dataclass
 class Report:
     findings: list[Finding]
     exceptions: list[str]
     unchecked: list[str] = field(default_factory=list)
+    comment_only_verdicts: list[Verdict] | None = None
 
     @property
     def blocking(self) -> list[Finding]:
         return [finding for finding in self.findings if finding.blocking]
 
     @property
+    def disproved_comment_only(self) -> list[Verdict]:
+        return [verdict for verdict in self.comment_only_verdicts or [] if not verdict.comment_only]
+
+    @property
     def passed(self) -> bool:
-        return not self.blocking or bool(self.exceptions)
+        return (not self.blocking or bool(self.exceptions)) and not self.disproved_comment_only
 
     def annotations(self) -> list[str]:
         return [self._annotation(finding) for finding in self.findings]
@@ -43,10 +55,21 @@ class Report:
         if self.unchecked:
             listed = ", ".join(f"`{path}`" for path in self.unchecked)
             lines.append(f"- Not checked (unreadable, unlexable or minified): {listed}")
+        lines += self._comment_only_lines()
         if self.findings:
             lines += ["", "| Smell | Severity | Location | Finding |", "| --- | --- | --- | --- |"]
             lines += [_summary_row(finding) for finding in self.findings[:SUMMARY_ROW_LIMIT]]
         return "\n".join(lines) + "\n"
+
+    def _comment_only_lines(self) -> list[str]:
+        if self.comment_only_verdicts is None:
+            return []
+        disproved = self.disproved_comment_only
+        if not disproved:
+            return [f"- Declared comment-only: proven for all {len(self.comment_only_verdicts)} changed files."]
+        return [f"- Declared comment-only, but **not proven** for {len(disproved)} files:"] + [
+            f"  - `{verdict.path}`: {verdict.problem}" for verdict in disproved
+        ]
 
     def _verdict(self) -> str:
         counts = f"{len(self.blocking)} blocking, {len(self.findings) - len(self.blocking)} advisory"

@@ -16,7 +16,8 @@ OUTPUT = re.compile(r"(?:^|[._-])(?:audits?|evidence|reports?|receipts?|snapshot
                     re.IGNORECASE)
 OUTPUT_SUFFIXES = {".json", ".jsonl", ".yaml", ".yml", ".md", ".txt", ".log", ".csv",
                    ".html", ".xml", ".png", ".zip"}
-RUN_DIRECTORIES = {"artifacts", "test-results", "testresults", "coverage", "results", "review-screenshots"}
+RESERVED_OUTPUT_DIRECTORIES = {"artifacts", "test-results", "testresults"}
+RUN_DIRECTORIES = {"coverage", "results", "review-screenshots"}
 SOURCE_ROOTS = {"src", "tests", "test", "scripts", "tools", "packages", "apps", "build", "eng"}
 SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".tsx",
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
@@ -32,7 +33,7 @@ def forbidden_path(path, policy):
         return "scratch belongs outside tracked product files"
     if BACKUP.search(parts[-1]):
         return "editor or patch backup"
-    if any(part.lower() in RUN_DIRECTORIES for part in parts[:-1]):
+    if any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in parts[:-1]):
         return "run output must stay untracked under ignored artifacts/"
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
@@ -49,17 +50,23 @@ def violation(path, policy):
         return None
     parts = PurePosixPath(path).parts
     suffix = PurePosixPath(path).suffix.lower()
-    automation = path.startswith((".github/workflows/", ".github/actions/", ".github/ISSUE_TEMPLATE/",
-                                  "workflow-templates/")) and suffix in {".yml", ".yaml", ".md", ".sh", ".py"}
+    workflow = path.startswith((".github/workflows/", "workflow-templates/")) and suffix in {".yml", ".yaml"}
+    action = path.startswith(".github/actions/") and suffix in {".yml", ".yaml", ".sh", ".py", ".js"}
+    issue_template = path.startswith(".github/ISSUE_TEMPLATE/") and suffix in {".yml", ".yaml", ".md"}
     source = parts[0] in SOURCE_ROOTS and suffix in SOURCE_SUFFIXES
     live_page = path in policy["roots"] and suffix == ".html"
-    if source or automation or live_page:
+    if source or workflow or action or issue_template or live_page:
         return None
+    if any(part.lower() in RUN_DIRECTORIES for part in parts[:-1]):
+        return "run output must stay untracked under ignored artifacts/"
     if any(HISTORY.search(part) for part in parts[:-1]):
         return "historical output belongs under ignored artifacts/"
     if DATE.search(path):
         return "date-stamped output belongs under ignored artifacts/"
-    if suffix in OUTPUT_SUFFIXES and OUTPUT.search(parts[-1]):
+    prose = suffix in {".md", ".html"}
+    output_name = re.search(r"(?:^|[._-])(?:audit|evidence|report|receipt|snapshot|observations)$",
+                            PurePosixPath(path).stem, re.IGNORECASE) if prose else OUTPUT.search(parts[-1])
+    if suffix in OUTPUT_SUFFIXES and output_name:
         return "run output requires an exact gate-input exception"
     return None
 

@@ -55,14 +55,28 @@ class PathPolicyTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIsNone(self.rules.violation(path, policy))
         self.assertTrue(self.rules.violation(".github/workflows/evidence/run.json", policy))
+        output = ".github/workflows/audit-2026-11-06.md"
+        self.assertEqual(self.rules.violation(output, policy), "date-stamped output belongs under ignored artifacts/")
+        policy["gate_inputs"][output] = "Pinned contract required by the release checker"
+        self.assertIsNone(self.rules.violation(output, policy))
 
     def test_source_modules_are_maintained_but_data_snapshots_need_exact_exceptions(self):
         for path in ("src/reports/Report.cs", "src/archive/Archive.cs", "tests/snapshots/test_report.py",
-                     "src/migrations/V2026_11_06__init.sql"):
+                     "src/migrations/V2026_11_06__init.sql", "src/Coverage/CoverageService.cs",
+                     "src/Results/Result.cs", "tests/Results/ResultsTests.cs"):
             with self.subTest(path=path):
                 self.assertIsNone(self.rules.violation(path, self.policy))
         self.assertEqual(self.rules.violation("tests/snapshots/results.json", self.policy),
                          "historical output belongs under ignored artifacts/")
+
+    def test_live_prose_is_distinct_from_named_run_reports(self):
+        for path in ("docs/security/audit-logging.md", "docs/guides/reports.md", "docs/admin/snapshots.md"):
+            with self.subTest(path=path):
+                self.assertIsNone(self.rules.violation(path, self.policy))
+        for path in ("docs/test-report.json", "docs/release-audit.md", "docs/report.md"):
+            with self.subTest(path=path):
+                self.assertEqual(self.rules.violation(path, self.policy),
+                                 "run output requires an exact gate-input exception")
 
     def test_pinned_live_pages_and_workflow_templates_remain_product_files(self):
         policy = {"roots": ["evidence-demo.html", "workflow-templates/"], "gate_inputs": {}}
@@ -183,11 +197,22 @@ class GitDiffTests(unittest.TestCase):
                                   "file://" + str(self.repo), head], capture_output=True, text=True)
         self.assertEqual(fetched.returncode, 0, fetched.stderr)
         self.assertFalse((bare / "docs").exists())
+        payload = self.git("rev-parse", f"{head}:docs/archive/new.md")
+        policy = self.git("rev-parse", f"{head}^1:{RULES.POLICY_PATH}")
+        missing = subprocess.check_output(["git", "-C", str(bare), "rev-list", "--objects",
+                                           "--missing=print", "FETCH_HEAD"], text=True)
+        self.assertIn("?" + payload, missing.splitlines())
+        self.assertNotIn("?" + policy, missing.splitlines())
+        subprocess.run(["git", "-C", str(bare), "remote", "set-url", "origin",
+                        str(self.repo / "unavailable")], check=True)
         result = subprocess.run(["python3", "-I", str(ROOT / "check.py"), "--repo", str(bare),
                                  "--base", "FETCH_HEAD^1",
                                  "--head", "FETCH_HEAD"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("docs/archive/new.md", result.stdout)
+        missing_after = subprocess.check_output(["git", "-C", str(bare), "rev-list", "--objects",
+                                                 "--missing=print", "FETCH_HEAD"], text=True)
+        self.assertIn("?" + payload, missing_after.splitlines())
 
 
 if __name__ == "__main__":

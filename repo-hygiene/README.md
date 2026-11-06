@@ -32,5 +32,10 @@ Run locally from the target repository with the shared tool's absolute path:
 
 ```sh
 python3 -I /path/to/shared/repo-hygiene/check.py --base origin/trunk
+```
+
+Test the tool from the shared repository:
+
+```sh
 python3 -m unittest discover -s repo-hygiene -p 'test_*.py'
 ```

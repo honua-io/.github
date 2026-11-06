@@ -19,6 +19,7 @@ Callers run on every `pull_request`, with no path filter, using an immutable com
 name: Repository hygiene
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 permissions:
   contents: read
 jobs:

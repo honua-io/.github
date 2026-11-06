@@ -39,13 +39,22 @@ def forbidden_path(path, policy):
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
         return "unexpected top-level entry"
-    if parts[0] == "samples" and not policy.get("samples", False):
+    return None
+
+
+def product_sample_violation(path, policy):
+    if path.startswith("samples/") and not policy.get("samples", False):
         return "product demonstrations belong in honua-samples"
     return None
 
 
 def violation(path, policy):
+    directory_input = any(path.startswith(directory) for directory in policy.get("gate_input_directories", {}))
     if reason := forbidden_path(path, policy):
+        return reason
+    if directory_input:
+        return None
+    if reason := product_sample_violation(path, policy):
         return reason
     if path in policy.get("gate_inputs", {}):
         return None
@@ -88,13 +97,21 @@ def load_policy(repo, base):
             raise ValueError("roots must be exact top-level files or directories ending in /")
         if root.rstrip("/") in (".", ".."):
             raise ValueError("invalid root entry")
-    gate_inputs = policy.get("gate_inputs", {})
-    if not isinstance(gate_inputs, dict):
-        raise ValueError("gate inputs must be exact paths with reasons")
-    if any(not isinstance(reason, str) or not reason.strip() for reason in gate_inputs.values()):
-        raise ValueError("gate-input exceptions require reasons")
-    if any(forbidden_path(path, policy) for path in gate_inputs):
-        raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
+    for field in ("gate_inputs", "gate_input_directories"):
+        exceptions = policy.get(field, {})
+        if not isinstance(exceptions, dict):
+            raise ValueError("gate-input exceptions must be paths with reasons")
+        if any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values()):
+            raise ValueError("gate-input exceptions require reasons")
+        directory = field == "gate_input_directories"
+        for path in exceptions:
+            if directory and (not path.endswith("/") or any(character in path for character in "*?[]{}\\")):
+                raise ValueError("gate-input directories must be literal prefixes ending in /")
+            # Probe a descendant too so parent-directory bans apply to the prefix itself.
+            if (forbidden_path(path[:-1] if directory else path, policy)
+                    or (directory and forbidden_path(path + "gate-input", policy))
+                    or (not directory and product_sample_violation(path, policy))):
+                raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
     if not isinstance(policy.get("samples", False), bool):
         raise ValueError("samples must be a boolean")
     return policy

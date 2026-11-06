@@ -39,17 +39,18 @@ def forbidden_path(path, policy):
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
         return "unexpected top-level entry"
-    if parts[0] == "samples" and not policy.get("samples", False):
-        return "product demonstrations belong in honua-samples"
     return None
 
 
 def violation(path, policy):
     if reason := forbidden_path(path, policy):
         return reason
-    if path in policy.get("gate_inputs", {}):
+    if path in policy.get("gate_inputs", {}) or any(
+            path.startswith(directory) for directory in policy.get("gate_input_directories", {})):
         return None
     parts = PurePosixPath(path).parts
+    if parts[0] == "samples" and not policy.get("samples", False):
+        return "product demonstrations belong in honua-samples"
     suffix = PurePosixPath(path).suffix.lower()
     workflow = path.startswith((".github/workflows/", "workflow-templates/")) and suffix in {".yml", ".yaml"}
     action = path.startswith(".github/actions/") and suffix in {".yml", ".yaml", ".sh", ".py", ".js"}
@@ -88,13 +89,20 @@ def load_policy(repo, base):
             raise ValueError("roots must be exact top-level files or directories ending in /")
         if root.rstrip("/") in (".", ".."):
             raise ValueError("invalid root entry")
-    gate_inputs = policy.get("gate_inputs", {})
-    if not isinstance(gate_inputs, dict):
-        raise ValueError("gate inputs must be exact paths with reasons")
-    if any(not isinstance(reason, str) or not reason.strip() for reason in gate_inputs.values()):
-        raise ValueError("gate-input exceptions require reasons")
-    if any(forbidden_path(path, policy) for path in gate_inputs):
-        raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
+    for field in ("gate_inputs", "gate_input_directories"):
+        exceptions = policy.get(field, {})
+        if not isinstance(exceptions, dict):
+            raise ValueError("gate-input exceptions must be paths with reasons")
+        if any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values()):
+            raise ValueError("gate-input exceptions require reasons")
+        for path in exceptions:
+            directory = field == "gate_input_directories"
+            if any(character in path for character in "*?[]{}\\") or path.endswith("/") != directory:
+                raise ValueError("gate-input exceptions must be literal files or directories ending in /")
+            if forbidden_path(path[:-1] if directory else path, policy):
+                raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
+            if directory and forbidden_path(path + "gate-input", policy):
+                raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
     if not isinstance(policy.get("samples", False), bool):
         raise ValueError("samples must be a boolean")
     return policy

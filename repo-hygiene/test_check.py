@@ -48,6 +48,21 @@ class PathPolicyTests(unittest.TestCase):
         policy = {"roots": ["samples/"], "gate_inputs": {}, "samples": True}
         self.assertIsNone(self.rules.violation("samples/demo/main.py", policy))
 
+    def test_directory_gate_inputs_are_scoped_to_literal_prefixes(self):
+        policy = {"roots": ["samples/", "mcp/"],
+                  "gate_input_directories": {"samples/evidence/": "Release seal input",
+                                             "mcp/evals/runs/": "Release scorecard input"}}
+        for path in ("samples/evidence/run-2026-11-06/receipt.json",
+                     "mcp/evals/runs/new-id/report.json"):
+            with self.subTest(path=path):
+                self.assertIsNone(self.rules.violation(path, policy))
+        for path in ("samples/evidence-other/report.json", "samples/evidence.json",
+                     "samples/demo/main.py", "mcp/evals/runs-other/report.json",
+                     "samples/evidence/tmp/probe.json", "samples/evidence/report.json.bak",
+                     "samples/evidence/artifacts/receipt.json"):
+            with self.subTest(path=path):
+                self.assertTrue(self.rules.violation(path, policy))
+
     def test_maintained_automation_is_not_run_output(self):
         policy = {"roots": [".github/"], "gate_inputs": {}}
         for path in (".github/workflows/notify-evidence.yml", ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -181,6 +196,36 @@ class GitDiffTests(unittest.TestCase):
                 result = self.check()
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn("could not evaluate", result.stdout)
+
+    def test_directory_gate_inputs_are_validated_and_read_from_base(self):
+        policy = {"roots": [".github/", "samples/"],
+                  "gate_input_directories": {"samples/evidence/": "Release seal input"}}
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.base = self.commit()
+        self.write("samples/evidence/new-run/receipt-2026-11-06.json", "gate input\n")
+        self.commit()
+        self.assertEqual(self.check().returncode, 0)
+        policy["gate_input_directories"]["samples/demo/"] = "Candidate-only exception"
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.write("samples/demo/main.py", "candidate code\n")
+        self.commit()
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('"samples/demo/main.py": product demonstrations', result.stdout)
+
+    def test_malformed_directory_exceptions_fail_closed(self):
+        invalid = [[], {"docs/evidence/": ""}, {"docs/evidence": "Input"},
+                   {"docs/*/": "Input"}, {"docs/evidence?/": "Input"},
+                   {"docs/[evidence]/": "Input"}, {"docs/{evidence}/": "Input"},
+                   {"docs/../evidence/": "Input"}, {"outside/evidence/": "Input"},
+                   {"docs/artifacts/": "Input"}, {"docs/tmp/": "Input"},
+                   {"docs/fix.bak/": "Input"}, {"docs/evidence//": "Input"}]
+        for exceptions in invalid:
+            with self.subTest(exceptions=exceptions):
+                policy = {"roots": [".github/", "docs/"], "gate_input_directories": exceptions}
+                self.write(RULES.POLICY_PATH, json.dumps(policy))
+                self.base = self.commit()
+                self.assertEqual(self.check().returncode, 1)
 
     def test_unicode_product_path_is_counted_and_accepted(self):
         self.write("docs/地図.md", "guide\n")

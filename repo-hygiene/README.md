@@ -11,7 +11,7 @@ Each repository owns `.github/hygiene.json`, read with `git show` from the trust
 }
 ```
 
-Root files match exactly; directory entries end with `/`. `gate_inputs` permits exact paths with a reason naming their build or release consumer. Keep exceptions short. Source modules and recognized GitHub automation are maintained files. Historical evidence, audits, archives, reports, dated output, scratch directories and backups are rejected. Tools write output beneath gitignored `/artifacts/`; force-adding output there is rejected too. Product repositories cannot add `samples/`; a sample repository can set `"samples": true` in its own configuration.
+Root files match exactly; directory entries end with `/`. `gate_inputs` permits exact paths with a reason naming their build or release consumer. For a gate that consumes dynamically named files, `gate_input_directories` maps literal directory prefixes ending in `/` to consumer-specific reasons. These prefixes match descendants only, and cannot bypass root restrictions, scratch paths, backups or reserved output directories. Wildcards are rejected. Keep exceptions short. Source modules and recognized GitHub automation are maintained files. Historical evidence, audits, archives, reports, dated output, scratch directories and backups are rejected. Tools write output beneath gitignored `/artifacts/`; force-adding output there is rejected too. Product repositories cannot add `samples/` except for explicitly listed gate inputs; a sample repository can set `"samples": true` in its own configuration.
 
 Callers run on every `pull_request`, with no path filter, using an immutable commit:
 

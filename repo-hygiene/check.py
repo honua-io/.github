@@ -24,6 +24,14 @@ SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
 
 
+def gate_input_directory(path, policy):
+    for directory in policy.get("gate_input_directories", {}):
+        if (path.startswith(directory)
+                and not any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in directory.split("/"))):
+            return directory
+    return None
+
+
 def forbidden_path(path, policy):
     parts = path.split("/")
     if not path or any(part in ("", ".", "..") for part in parts):
@@ -34,7 +42,8 @@ def forbidden_path(path, policy):
         return "scratch belongs outside tracked product files"
     if BACKUP.search(parts[-1]):
         return "editor or patch backup"
-    if any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in parts[:-1]):
+    reserved = {part.lower() for part in parts[:-1]} & RESERVED_OUTPUT_DIRECTORIES
+    if reserved and (reserved != {"artifacts"} or not gate_input_directory(path, policy)):
         return "run output must stay untracked under ignored artifacts/"
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
@@ -49,10 +58,9 @@ def product_sample_violation(path, policy):
 
 
 def violation(path, policy):
-    directory_input = any(path.startswith(directory) for directory in policy.get("gate_input_directories", {}))
     if reason := forbidden_path(path, policy):
         return reason
-    if directory_input:
+    if gate_input_directory(path, policy):
         return None
     if reason := product_sample_violation(path, policy):
         return reason

@@ -70,10 +70,12 @@ class PathPolicyTests(unittest.TestCase):
                          "historical output belongs under ignored artifacts/")
 
     def test_live_prose_is_distinct_from_named_run_reports(self):
-        for path in ("docs/security/audit-logging.md", "docs/guides/reports.md", "docs/admin/snapshots.md"):
+        for path in ("docs/security/audit-logging.md", "docs/guides/reports.md", "docs/admin/snapshots.md",
+                     "docs/guides/reports.html"):
             with self.subTest(path=path):
                 self.assertIsNone(self.rules.violation(path, self.policy))
-        for path in ("docs/test-report.json", "docs/release-audit.md", "docs/report.md"):
+        for path in ("docs/test-report.json", "docs/release-audit.md", "docs/report.md",
+                     "docs/coverage-report.html", "docs/observations.md", "docs/observation.md"):
             with self.subTest(path=path):
                 self.assertEqual(self.rules.violation(path, self.policy),
                                  "run output requires an exact gate-input exception")
@@ -186,6 +188,23 @@ class GitDiffTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("1 added file(s), 0 violation(s)", result.stdout)
+
+    def test_results_gate_input_is_explicit_but_artifacts_stay_reserved(self):
+        policy = {"roots": [".github/", "src/", "tests/", "coverage/", "artifacts/"],
+                  "gate_inputs": {"tests/results/matrix.v1.json": "Versioned release checker input"}}
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.base = self.commit()
+        loaded = RULES.load_policy(self.repo, self.base)
+        self.assertIsNone(RULES.violation("tests/results/matrix.v1.json", loaded))
+        for path in ("src/Results/output.json", "coverage/lcov.json", "tests/results/unpinned.json"):
+            with self.subTest(path=path):
+                self.assertEqual(RULES.violation(path, loaded),
+                                 "run output must stay untracked under ignored artifacts/")
+        policy["gate_inputs"]["artifacts/matrix.v1.json"] = "Cannot override the ignored output root"
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.base = self.commit()
+        with self.assertRaisesRegex(ValueError, "cannot override forbidden paths"):
+            RULES.load_policy(self.repo, self.base)
 
     def test_bare_fetch_evaluates_paths_without_materializing_candidate_files(self):
         self.write("docs/archive/new.md", "candidate content\n")

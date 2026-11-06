@@ -12,8 +12,9 @@ HISTORY = re.compile(r"^\.?(?:evidence|audits?|archives?|reports?|receipts?|snap
                      r"(?:$|[-_.])", re.IGNORECASE)
 DATE = re.compile(r"(?<!\d)20\d{2}(?:[-_.]\d{2}(?:[-_.]\d{2})?|\d{4})(?!\d)")
 BACKUP = re.compile(r"(?:\.(?:orig|rej|bak|backup|sw[pon])(?:\.\d+)?|~(?:\d+~)?)$", re.IGNORECASE)
-OUTPUT = re.compile(r"(?:^|[._-])(?:audits?|evidence|reports?|receipts?|snapshots?|observations)(?:$|[._-])",
-                    re.IGNORECASE)
+OUTPUT_NOUN = r"(?:audit|evidence|report|receipt|snapshot|observation)"
+OUTPUT = re.compile(rf"(?:^|[._-]){OUTPUT_NOUN}s?(?:$|[._-])", re.IGNORECASE)
+PROSE_OUTPUT = re.compile(rf"(?:^|[._-])(?:{OUTPUT_NOUN}|observations)$", re.IGNORECASE)
 OUTPUT_SUFFIXES = {".json", ".jsonl", ".yaml", ".yml", ".md", ".txt", ".log", ".csv",
                    ".html", ".xml", ".png", ".zip"}
 RESERVED_OUTPUT_DIRECTORIES = {"artifacts", "test-results", "testresults"}
@@ -64,8 +65,7 @@ def violation(path, policy):
     if DATE.search(path):
         return "date-stamped output belongs under ignored artifacts/"
     prose = suffix in {".md", ".html"}
-    output_name = re.search(r"(?:^|[._-])(?:audit|evidence|report|receipt|snapshot|observations)$",
-                            PurePosixPath(path).stem, re.IGNORECASE) if prose else OUTPUT.search(parts[-1])
+    output_name = PROSE_OUTPUT.search(PurePosixPath(path).stem) if prose else OUTPUT.search(parts[-1])
     if suffix in OUTPUT_SUFFIXES and output_name:
         return "run output requires an exact gate-input exception"
     return None

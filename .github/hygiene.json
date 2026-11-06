@@ -1,0 +1,13 @@
+{
+  "roots": [
+    ".github/",
+    ".gitignore",
+    "SECURITY.md",
+    "SECURITY.txt",
+    "clean-code/",
+    "profile/",
+    "repo-hygiene/",
+    "workflow-templates/"
+  ],
+  "gate_inputs": {}
+}

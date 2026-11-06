@@ -24,7 +24,7 @@ SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
 
 
-def forbidden_path(path, policy, *, gate_input_directory=False):
+def forbidden_path(path, policy):
     parts = path.split("/")
     if not path or any(part in ("", ".", "..") for part in parts):
         return "invalid repository path"
@@ -39,16 +39,24 @@ def forbidden_path(path, policy, *, gate_input_directory=False):
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
         return "unexpected top-level entry"
-    if parts[0] == "samples" and not policy.get("samples", False) and not gate_input_directory:
+    return None
+
+
+def product_sample_violation(path, policy):
+    if path.startswith("samples/") and not policy.get("samples", False):
         return "product demonstrations belong in honua-samples"
     return None
 
 
 def violation(path, policy):
     directory_input = any(path.startswith(directory) for directory in policy.get("gate_input_directories", {}))
-    if reason := forbidden_path(path, policy, gate_input_directory=directory_input):
+    if reason := forbidden_path(path, policy):
         return reason
-    if path in policy.get("gate_inputs", {}) or directory_input:
+    if directory_input:
+        return None
+    if reason := product_sample_violation(path, policy):
+        return reason
+    if path in policy.get("gate_inputs", {}):
         return None
     parts = PurePosixPath(path).parts
     suffix = PurePosixPath(path).suffix.lower()
@@ -98,10 +106,11 @@ def load_policy(repo, base):
         directory = field == "gate_input_directories"
         for path in exceptions:
             if directory and (not path.endswith("/") or any(character in path for character in "*?[]{}\\")):
-                raise ValueError("gate-input exceptions must be literal files or directories ending in /")
+                raise ValueError("gate-input directories must be literal prefixes ending in /")
             # Probe a descendant too so parent-directory bans apply to the prefix itself.
-            if (forbidden_path(path[:-1] if directory else path, policy, gate_input_directory=directory)
-                    or directory and forbidden_path(path + "gate-input", policy, gate_input_directory=True)):
+            if (forbidden_path(path[:-1] if directory else path, policy)
+                    or (directory and forbidden_path(path + "gate-input", policy))
+                    or (not directory and product_sample_violation(path, policy))):
                 raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
     if not isinstance(policy.get("samples", False), bool):
         raise ValueError("samples must be a boolean")

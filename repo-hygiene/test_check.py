@@ -216,7 +216,8 @@ class GitDiffTests(unittest.TestCase):
     def test_exact_gate_input_rules_remain_unchanged(self):
         policy = {"roots": [".github/", "docs/", "samples/"],
                   "gate_inputs": {"docs/[id].json": "Literal gate input",
-                                  "docs/{input}.json": "Literal gate input"}}
+                                  "docs/{input}.json": "Literal gate input",
+                                  "docs/a\\b.json": "Literal gate input"}}
         self.write(RULES.POLICY_PATH, json.dumps(policy))
         self.base = self.commit()
         loaded = RULES.load_policy(self.repo, self.base)

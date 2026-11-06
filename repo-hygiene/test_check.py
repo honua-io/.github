@@ -213,6 +213,21 @@ class GitDiffTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn('"samples/demo/main.py": product demonstrations', result.stdout)
 
+    def test_exact_gate_input_rules_remain_unchanged(self):
+        policy = {"roots": [".github/", "docs/", "samples/"],
+                  "gate_inputs": {"docs/[id].json": "Literal gate input",
+                                  "docs/{input}.json": "Literal gate input"}}
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.base = self.commit()
+        loaded = RULES.load_policy(self.repo, self.base)
+        for path in policy["gate_inputs"]:
+            self.assertIsNone(RULES.violation(path, loaded))
+        policy["gate_inputs"]["samples/demo.py"] = "Cannot bypass product sample ban"
+        self.write(RULES.POLICY_PATH, json.dumps(policy))
+        self.base = self.commit()
+        with self.assertRaisesRegex(ValueError, "cannot override forbidden paths"):
+            RULES.load_policy(self.repo, self.base)
+
     def test_malformed_directory_exceptions_fail_closed(self):
         invalid = [[], {"docs/evidence/": ""}, {"docs/evidence": "Input"},
                    {"docs/*/": "Input"}, {"docs/evidence?/": "Input"},
@@ -225,7 +240,9 @@ class GitDiffTests(unittest.TestCase):
                 policy = {"roots": [".github/", "docs/"], "gate_input_directories": exceptions}
                 self.write(RULES.POLICY_PATH, json.dumps(policy))
                 self.base = self.commit()
-                self.assertEqual(self.check().returncode, 1)
+                result = self.check()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("could not evaluate", result.stdout)
 
     def test_unicode_product_path_is_counted_and_accepted(self):
         self.write("docs/地図.md", "guide\n")

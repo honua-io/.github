@@ -24,7 +24,7 @@ SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
 
 
-def forbidden_path(path, policy):
+def forbidden_path(path, policy, *, gate_input_directory=False):
     parts = path.split("/")
     if not path or any(part in ("", ".", "..") for part in parts):
         return "invalid repository path"
@@ -39,18 +39,18 @@ def forbidden_path(path, policy):
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
         return "unexpected top-level entry"
+    if parts[0] == "samples" and not policy.get("samples", False) and not gate_input_directory:
+        return "product demonstrations belong in honua-samples"
     return None
 
 
 def violation(path, policy):
-    if reason := forbidden_path(path, policy):
+    directory_input = any(path.startswith(directory) for directory in policy.get("gate_input_directories", {}))
+    if reason := forbidden_path(path, policy, gate_input_directory=directory_input):
         return reason
-    if path in policy.get("gate_inputs", {}) or any(
-            path.startswith(directory) for directory in policy.get("gate_input_directories", {})):
+    if path in policy.get("gate_inputs", {}) or directory_input:
         return None
     parts = PurePosixPath(path).parts
-    if parts[0] == "samples" and not policy.get("samples", False):
-        return "product demonstrations belong in honua-samples"
     suffix = PurePosixPath(path).suffix.lower()
     workflow = path.startswith((".github/workflows/", "workflow-templates/")) and suffix in {".yml", ".yaml"}
     action = path.startswith(".github/actions/") and suffix in {".yml", ".yaml", ".sh", ".py", ".js"}
@@ -95,13 +95,13 @@ def load_policy(repo, base):
             raise ValueError("gate-input exceptions must be paths with reasons")
         if any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values()):
             raise ValueError("gate-input exceptions require reasons")
+        directory = field == "gate_input_directories"
         for path in exceptions:
-            directory = field == "gate_input_directories"
-            if any(character in path for character in "*?[]{}\\") or path.endswith("/") != directory:
+            if directory and (not path.endswith("/") or any(character in path for character in "*?[]{}\\")):
                 raise ValueError("gate-input exceptions must be literal files or directories ending in /")
-            if forbidden_path(path[:-1] if directory else path, policy):
-                raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
-            if directory and forbidden_path(path + "gate-input", policy):
+            # Probe a descendant too so parent-directory bans apply to the prefix itself.
+            if (forbidden_path(path[:-1] if directory else path, policy, gate_input_directory=directory)
+                    or directory and forbidden_path(path + "gate-input", policy, gate_input_directory=True)):
                 raise ValueError("gate-input exceptions cannot override forbidden paths or roots")
     if not isinstance(policy.get("samples", False), bool):
         raise ValueError("samples must be a boolean")

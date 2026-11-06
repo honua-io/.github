@@ -17,7 +17,7 @@ Honua Server is currently pre-1.0 and under active development.
 
 | Repo | What it is |
 |---|---|
-| [honua-server](https://github.com/honua-io/honua-server) | Flagship multi-protocol geospatial server (ELv2 open core) |
+| [honua-server](https://github.com/honua-io/honua-server) | Flagship multi-protocol geospatial server (FCL-1.0-ALv2) |
 | [honua-console](https://github.com/honua-io/honua-console) | Unified web console — Studio, Catalog, Operate, Share |
 | [honua-helm](https://github.com/honua-io/honua-helm) | Helm chart — the Kubernetes deploy path |
 
@@ -49,7 +49,7 @@ Honua Server is currently pre-1.0 and under active development.
 | [ArcGIS service import](https://github.com/honua-io/honua-server/blob/trunk/docs/guides/publish/import-from-arcgis-services.md) | Discover ArcGIS Server or ArcGIS Online services, copy features into PostGIS, and publish Honua layers |
 | [GeoServer migration](https://github.com/honua-io/honua-server/blob/trunk/docs/guides/migrate/from-geoserver.md) | Scan catalogs, dry-run and apply supported metadata and styles, then repoint WMS/WFS clients |
 
-Licensing varies by repository: `honua-server` and `honua-collect` use the Elastic License 2.0 (ELv2);
+Licensing varies by repository: `honua-server` and `honua-collect` use the Fair Core License, Version 1.0, ALv2 Future License (FCL-1.0-ALv2);
 all other repositories listed here use the Apache License 2.0.
 
 ## Security

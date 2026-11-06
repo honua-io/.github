@@ -25,11 +25,8 @@ SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".
 
 
 def gate_input_directory(path, policy):
-    for directory in policy.get("gate_input_directories", {}):
-        if (path.startswith(directory)
-                and not any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in directory.split("/"))):
-            return directory
-    return None
+    return next((directory for directory in policy.get("gate_input_directories", {})
+                 if path.startswith(directory)), None)
 
 
 def forbidden_path(path, policy):
@@ -105,16 +102,18 @@ def load_policy(repo, base):
             raise ValueError("roots must be exact top-level files or directories ending in /")
         if root.rstrip("/") in (".", ".."):
             raise ValueError("invalid root entry")
-    for field in ("gate_inputs", "gate_input_directories"):
-        exceptions = policy.get(field, {})
-        if not isinstance(exceptions, dict):
-            raise ValueError("gate-input exceptions must be paths with reasons")
+    input_exceptions = {field: policy.get(field, {}) for field in ("gate_inputs", "gate_input_directories")}
+    if any(not isinstance(exceptions, dict) for exceptions in input_exceptions.values()):
+        raise ValueError("gate-input exceptions must be paths with reasons")
+    for field, exceptions in input_exceptions.items():
         if any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values()):
             raise ValueError("gate-input exceptions require reasons")
         directory = field == "gate_input_directories"
         for path in exceptions:
             if directory and (not path.endswith("/") or any(character in path for character in "*?[]{}\\")):
                 raise ValueError("gate-input directories must be literal prefixes ending in /")
+            if directory and any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in path.split("/")):
+                raise ValueError("gate-input directory prefixes cannot contain reserved output directories")
             # Probe a descendant too so parent-directory bans apply to the prefix itself.
             if (forbidden_path(path[:-1] if directory else path, policy)
                     or (directory and forbidden_path(path + "gate-input", policy))

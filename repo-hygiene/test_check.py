@@ -201,6 +201,10 @@ class GitDiffTests(unittest.TestCase):
                    {"roots": [None]}, {"roots": ["docs/"], "gate_inputs": []},
                    {"roots": ["docs/"], "gate_inputs": {"docs/audit.json": ""}},
                    {"roots": ["docs/"], "gate_inputs": {"outside.json": "Gate"}},
+                   {"roots": ["docs/"], "gate_inputs": {"docs/artifacts/input.json": "Gate"},
+                    "gate_input_directories": None},
+                   {"roots": ["docs/"], "gate_inputs": {"docs/artifacts/input.json": "Gate"},
+                    "gate_input_directories": 1},
                    {"roots": ["docs/"], "samples": "false"}]
         for policy in invalid:
             with self.subTest(policy=policy):
@@ -249,11 +253,14 @@ class GitDiffTests(unittest.TestCase):
                    {"docs/[evidence]/": "Input"}, {"docs/{evidence}/": "Input"},
                    {"docs/../evidence/": "Input"}, {"outside/evidence/": "Input"},
                    {"docs/artifacts/": "Input"}, {"artifacts/": "Input"},
+                   {"docs/a/": "Input", "docs/a/artifacts/": "Input"},
+                   {"docs/a/": "Input", "docs/a/Artifacts/": "Input"},
                    {"docs/tmp/": "Input"},
                    {"docs/fix.bak/": "Input"}, {"docs/evidence//": "Input"}]
         for exceptions in invalid:
             with self.subTest(exceptions=exceptions):
-                policy = {"roots": [".github/", "docs/"], "gate_input_directories": exceptions}
+                policy = {"roots": [".github/", "docs/", "artifacts/"],
+                          "gate_input_directories": exceptions}
                 self.write(RULES.POLICY_PATH, json.dumps(policy))
                 self.base = self.commit()
                 result = self.check()

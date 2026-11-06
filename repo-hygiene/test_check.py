@@ -53,15 +53,28 @@ class PathPolicyTests(unittest.TestCase):
                   "gate_input_directories": {"samples/evidence/": "Release seal input",
                                              "mcp/evals/runs/": "Release scorecard input"}}
         for path in ("samples/evidence/run-2026-11-06/receipt.json",
+                     "samples/evidence/demo/runs/new-id/artifacts/receipt.json",
                      "mcp/evals/runs/new-id/report.json"):
             with self.subTest(path=path):
                 self.assertIsNone(self.rules.violation(path, policy))
         for path in ("samples/evidence-other/report.json", "samples/evidence.json",
                      "samples/demo/main.py", "mcp/evals/runs-other/report.json",
                      "samples/evidence/tmp/probe.json", "samples/evidence/report.json.bak",
-                     "samples/evidence/artifacts/receipt.json"):
+                     "samples/evidence/demo/artifacts/tmp/probe.json",
+                     "samples/evidence/demo/artifacts/receipt.json.bak",
+                     "samples/evidence/demo/test-results/receipt.json"):
             with self.subTest(path=path):
                 self.assertTrue(self.rules.violation(path, policy))
+
+    def test_artifacts_are_reserved_outside_explicit_gate_input_directories(self):
+        policy = {"roots": ["artifacts/", "samples/", "mcp/", "docs/"],
+                  "gate_input_directories": {"samples/evidence/": "Release seal input"}}
+        for path in ("artifacts/receipt.json", "samples/artifacts/receipt.json",
+                     "samples/evidence-other/artifacts/receipt.json",
+                     "mcp/evals/runs/new-id/artifacts/receipt.json", "docs/artifacts/guide.md"):
+            with self.subTest(path=path):
+                self.assertEqual(self.rules.violation(path, policy),
+                                 "run output must stay untracked under ignored artifacts/")
 
     def test_maintained_automation_is_not_run_output(self):
         policy = {"roots": [".github/"], "gate_inputs": {}}
@@ -188,6 +201,10 @@ class GitDiffTests(unittest.TestCase):
                    {"roots": [None]}, {"roots": ["docs/"], "gate_inputs": []},
                    {"roots": ["docs/"], "gate_inputs": {"docs/audit.json": ""}},
                    {"roots": ["docs/"], "gate_inputs": {"outside.json": "Gate"}},
+                   {"roots": ["docs/"], "gate_inputs": {"docs/artifacts/input.json": "Gate"},
+                    "gate_input_directories": None},
+                   {"roots": ["docs/"], "gate_inputs": {"docs/artifacts/input.json": "Gate"},
+                    "gate_input_directories": 1},
                    {"roots": ["docs/"], "samples": "false"}]
         for policy in invalid:
             with self.subTest(policy=policy):
@@ -203,6 +220,7 @@ class GitDiffTests(unittest.TestCase):
         self.write(RULES.POLICY_PATH, json.dumps(policy))
         self.base = self.commit()
         self.write("samples/evidence/new-run/receipt-2026-11-06.json", "gate input\n")
+        self.write("samples/evidence/new-run/artifacts/seal-input.json", "bound gate input\n")
         self.commit()
         self.assertEqual(self.check().returncode, 0)
         policy["gate_input_directories"]["samples/demo/"] = "Candidate-only exception"
@@ -234,11 +252,15 @@ class GitDiffTests(unittest.TestCase):
                    {"docs/*/": "Input"}, {"docs/evidence?/": "Input"},
                    {"docs/[evidence]/": "Input"}, {"docs/{evidence}/": "Input"},
                    {"docs/../evidence/": "Input"}, {"outside/evidence/": "Input"},
-                   {"docs/artifacts/": "Input"}, {"docs/tmp/": "Input"},
+                   {"docs/artifacts/": "Input"}, {"artifacts/": "Input"},
+                   {"docs/a/": "Input", "docs/a/artifacts/": "Input"},
+                   {"docs/a/": "Input", "docs/a/Artifacts/": "Input"},
+                   {"docs/tmp/": "Input"},
                    {"docs/fix.bak/": "Input"}, {"docs/evidence//": "Input"}]
         for exceptions in invalid:
             with self.subTest(exceptions=exceptions):
-                policy = {"roots": [".github/", "docs/"], "gate_input_directories": exceptions}
+                policy = {"roots": [".github/", "docs/", "artifacts/"],
+                          "gate_input_directories": exceptions}
                 self.write(RULES.POLICY_PATH, json.dumps(policy))
                 self.base = self.commit()
                 result = self.check()

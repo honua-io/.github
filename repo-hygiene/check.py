@@ -24,6 +24,11 @@ SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
 
 
+def gate_input_directory(path, policy):
+    return next((directory for directory in policy.get("gate_input_directories", {})
+                 if path.startswith(directory)), None)
+
+
 def forbidden_path(path, policy):
     parts = path.split("/")
     if not path or any(part in ("", ".", "..") for part in parts):
@@ -34,7 +39,8 @@ def forbidden_path(path, policy):
         return "scratch belongs outside tracked product files"
     if BACKUP.search(parts[-1]):
         return "editor or patch backup"
-    if any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in parts[:-1]):
+    reserved = {part.lower() for part in parts[:-1]} & RESERVED_OUTPUT_DIRECTORIES
+    if reserved and (reserved != {"artifacts"} or not gate_input_directory(path, policy)):
         return "run output must stay untracked under ignored artifacts/"
     roots = policy["roots"]
     if not any(path.startswith(root) if root.endswith("/") else path == root for root in roots):
@@ -49,10 +55,9 @@ def product_sample_violation(path, policy):
 
 
 def violation(path, policy):
-    directory_input = any(path.startswith(directory) for directory in policy.get("gate_input_directories", {}))
     if reason := forbidden_path(path, policy):
         return reason
-    if directory_input:
+    if gate_input_directory(path, policy):
         return None
     if reason := product_sample_violation(path, policy):
         return reason
@@ -97,16 +102,18 @@ def load_policy(repo, base):
             raise ValueError("roots must be exact top-level files or directories ending in /")
         if root.rstrip("/") in (".", ".."):
             raise ValueError("invalid root entry")
-    for field in ("gate_inputs", "gate_input_directories"):
-        exceptions = policy.get(field, {})
-        if not isinstance(exceptions, dict):
-            raise ValueError("gate-input exceptions must be paths with reasons")
+    input_exceptions = {field: policy.get(field, {}) for field in ("gate_inputs", "gate_input_directories")}
+    if any(not isinstance(exceptions, dict) for exceptions in input_exceptions.values()):
+        raise ValueError("gate-input exceptions must be paths with reasons")
+    for field, exceptions in input_exceptions.items():
         if any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values()):
             raise ValueError("gate-input exceptions require reasons")
         directory = field == "gate_input_directories"
         for path in exceptions:
             if directory and (not path.endswith("/") or any(character in path for character in "*?[]{}\\")):
                 raise ValueError("gate-input directories must be literal prefixes ending in /")
+            if directory and any(part.lower() in RESERVED_OUTPUT_DIRECTORIES for part in path.split("/")):
+                raise ValueError("gate-input directory prefixes cannot contain reserved output directories")
             # Probe a descendant too so parent-directory bans apply to the prefix itself.
             if (forbidden_path(path[:-1] if directory else path, policy)
                     or (directory and forbidden_path(path + "gate-input", policy))

@@ -1,0 +1,42 @@
+name: Repository hygiene
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Repository hygiene
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a trusted pinned policy identity
+        env:
+          POLICY_REPOSITORY: ${{ job.workflow_repository }}
+          POLICY_SHA: ${{ job.workflow_sha }}
+        run: |
+          [[ "$POLICY_REPOSITORY" == honua-io/.github ]]
+          [[ "$POLICY_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: Check out the pinned repository hygiene policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .repo-hygiene-tool
+          sparse-checkout: repo-hygiene
+          persist-credentials: false
+      - name: Fetch PR path metadata without a working tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash .repo-hygiene-tool/repo-hygiene/fetch-candidate.sh
+          "$RUNNER_TEMP/repo-hygiene-candidate.git"
+          "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+      - name: Check newly added paths
+        run: >-
+          python3 -I .repo-hygiene-tool/repo-hygiene/check.py
+          --repo "$RUNNER_TEMP/repo-hygiene-candidate.git"
+          --base FETCH_HEAD^1 --head FETCH_HEAD

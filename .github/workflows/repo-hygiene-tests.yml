@@ -1,0 +1,25 @@
+name: Repository hygiene tests
+
+on:
+  pull_request:
+    paths:
+      - repo-hygiene/**
+      - .github/workflows/repo-hygiene*.yml
+  push:
+    branches: [main]
+    paths:
+      - repo-hygiene/**
+      - .github/workflows/repo-hygiene*.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s repo-hygiene -p 'test_*.py'

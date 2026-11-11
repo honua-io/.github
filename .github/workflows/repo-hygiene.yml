@@ -10,7 +10,9 @@ jobs:
   check:
     name: Repository hygiene
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    # The caller repository's HONUA_LIGHT_RUNNER moves this job to its self-hosted light pool;
+    # pull requests from forks always stay on hosted runners.
+    runs-on: ${{ vars.HONUA_LIGHT_RUNNER && (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) && (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository) && fromJSON(vars.HONUA_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Require a trusted pinned policy identity

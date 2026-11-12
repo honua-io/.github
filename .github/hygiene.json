@@ -7,6 +7,7 @@
     "clean-code/",
     "profile/",
     "repo-hygiene/",
+    "runner-label-lint/",
     "workflow-templates/"
   ],
   "gate_inputs": {}

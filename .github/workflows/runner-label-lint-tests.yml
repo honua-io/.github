@@ -1,0 +1,27 @@
+name: Runner label lint tests
+
+on:
+  pull_request:
+    paths:
+      - runner-label-lint/**
+      - .github/workflows/runner-label-lint*.yml
+  push:
+    branches: [main]
+    paths:
+      - runner-label-lint/**
+      - .github/workflows/runner-label-lint*.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s runner-label-lint/tests -p 'test_*.py' -v
+      - name: Lint this repository's own workflows
+        run: python3 -I runner-label-lint/lint_runner_labels.py --repo .

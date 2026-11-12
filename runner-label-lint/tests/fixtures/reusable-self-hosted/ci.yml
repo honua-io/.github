@@ -1,0 +1,5 @@
+on:
+  pull_request:
+jobs:
+  call:
+    uses: ./.github/workflows/build.yml

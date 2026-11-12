@@ -1,0 +1,11 @@
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: ubuntu-24.04
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - run: echo ok

@@ -29,7 +29,9 @@ def parse_arguments(argv):
     parser.add_argument("--allow-label", action="append", default=[],
                         help="extra GitHub-hosted label, such as an organization larger runner")
     parser.add_argument("--deny-label", action="append", default=[], help="extra label that is never hosted")
-    parser.add_argument("--annotations", action="store_true", help="also print GitHub error annotations")
+    parser.add_argument("--annotations", action="store_true", help="print GitHub error and warning annotations")
+    parser.add_argument("--strict-untrusted-events", action="store_true",
+                        help="also fail on issue_comment, issues and discussion findings, which are advisory by default")
     return parser.parse_args(argv)
 
 
@@ -47,7 +49,7 @@ def _escape(text, escapes):
 
 def annotation(finding):
     properties = f"file={_escape(finding.path, PROPERTY_ESCAPES)},line={finding.line}"
-    return f"::error {properties}::{_escape(f'{finding.message}. Fix: {finding.hint}.', ANNOTATION_ESCAPES)}"
+    return f"::{finding.severity} {properties}::{_escape(f'{finding.message}. Fix: {finding.hint}.', ANNOTATION_ESCAPES)}"
 
 
 def main(argv):
@@ -57,8 +59,9 @@ def main(argv):
     findings = lint(arguments.repo, labels)
     for finding in findings:
         print(annotation(finding) if arguments.annotations else finding)
-    print(f"runner-label-lint: {len(findings)} finding(s)")
-    return 1 if findings else 0
+    failing = [finding for finding in findings if arguments.strict_untrusted_events or not finding.is_advisory]
+    print(f"runner-label-lint: {len(failing)} failing, {len(findings) - len(failing)} advisory finding(s)")
+    return 1 if failing else 0
 
 
 if __name__ == "__main__":

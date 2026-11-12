@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 import re
 
 from .expressions import is_compound, split_top_level, string_value, strip_parentheses, unwrap
-from .policy import LabelPolicy, admit, guard_text, guards_in, narrow_events, required_guards
+from .policy import UNTRUSTED_ACTOR_EVENTS, LabelPolicy, admit, guard_text, guards_in, narrow_events, required_guards
 from .workflows import calls_other_repository
 
 MAX_RESOLUTION_DEPTH = 4
@@ -18,6 +18,8 @@ LABEL_HINT = (f"use a GitHub-hosted label such as {HOSTED_FALLBACK}, or choose t
 GROUP_HINT = "choose the runner group through the fork-guarded expression, or skip the job for forks in its if:"
 FALLBACK_HINT = f"end the expression with || '{HOSTED_FALLBACK}' so fork events get a GitHub-hosted runner"
 TEMPLATE_HINT = "make runs-on a single ${{ }} expression or a literal label"
+FAILING = "error"
+ADVISORY = "warning"
 
 
 @dataclass(frozen=True)
@@ -32,9 +34,14 @@ class Finding:
     line: int
     message: str
     hint: str
+    severity: str = FAILING
+
+    @property
+    def is_advisory(self):
+        return self.severity == ADVISORY
 
     def __str__(self):
-        return f"{self.path}:{self.line}: {self.message}. Fix: {self.hint}."
+        return f"{self.path}:{self.line}: {self.severity}: {self.message}. Fix: {self.hint}."
 
 
 @dataclass(frozen=True)
@@ -82,16 +89,21 @@ def _check_remote_call(workflow, job_id, job, labels):
 
 
 def _check_value(workflow, job, site, labels):
+    """Fails on events whose workflow file a PR controls; untrusted-actor events alone are advisory.
+
+    GitHub runs issue_comment, issues and discussion* workflows from the default branch, so a fork cannot
+    choose their runs-on; a self-hosted choice there is still worth a warning.
+    """
     admission = admit(job.get("if"), workflow.events)
-    if not admission.events:
-        return []
-    context = JobContext(workflow, job, admission.events, labels)
-    problems = runs_on_problems(site.value, context, admission.guards)
-    if not problems:
-        return []
-    reasons = "; ".join(dict.fromkeys(problem.reason for problem in problems))
-    hints = "; ".join(dict.fromkeys(problem.hint for problem in problems))
-    return [Finding(workflow.path, site.line, f"{site.name}: {reasons}", hints)]
+    passes = ((admission.events - UNTRUSTED_ACTOR_EVENTS, FAILING), (admission.events, ADVISORY))
+    for events, severity in passes:
+        context = JobContext(workflow, job, frozenset(events), labels)
+        problems = runs_on_problems(site.value, context, admission.guards) if events else []
+        if problems:
+            reasons = "; ".join(dict.fromkeys(problem.reason for problem in problems))
+            hints = "; ".join(dict.fromkeys(problem.hint for problem in problems))
+            return [Finding(workflow.path, site.line, f"{site.name}: {reasons}", hints, severity)]
+    return []
 
 
 def runs_on_problems(value, context, guards):
@@ -188,8 +200,9 @@ def _matrix_values(job, name):
 def _input_values(context, name):
     candidates = []
     for call in context.workflow.calls:
-        caller_context = JobContext(call.caller, call.job, call.admission.events, context.labels, context.depth + 1)
-        if caller_context.required <= call.admission.guards:
+        events = call.admission.events & context.events
+        caller_context = JobContext(call.caller, call.job, events, context.labels, context.depth + 1)
+        if not events or caller_context.required <= call.admission.guards:
             continue
         arguments = call.job.get("with")
         value = arguments.get(name) if isinstance(arguments, dict) and name in arguments else None

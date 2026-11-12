@@ -80,11 +80,16 @@ class FixtureTests(unittest.TestCase):
 
     def test_reports_file_and_line(self):
         [finding] = self.assert_findings("literal-self-hosted", 1)
-        self.assertTrue(str(finding).startswith(".github/workflows/ci.yml:5: jobs.build.runs-on:"))
+        self.assertTrue(str(finding).startswith(".github/workflows/ci.yml:5: error: jobs.build.runs-on:"))
 
-    def test_untrusted_actor_events_need_an_event_exclusion(self):
-        self.assert_findings("issue-comment", 1, "github.event_name != 'issue_comment'")
+    def test_untrusted_actor_events_are_advisory(self):
+        [finding] = self.assert_findings("issue-comment", 1, "github.event_name != 'issue_comment'")
+        self.assertTrue(finding.is_advisory)
         self.assert_findings("issue-comment-excluded", 0)
+
+    def test_pull_request_events_stay_failing_alongside_untrusted_events(self):
+        [finding] = self.assert_findings("issue-comment-and-pull-request", 1, "label 'honua-light'")
+        self.assertFalse(finding.is_advisory)
 
     def test_caller_job_guard_covers_the_called_workflow(self):
         self.assert_findings("reusable-caller-guard", 0)
@@ -138,12 +143,23 @@ class OutputTests(unittest.TestCase):
 
     def test_command_line_exit_codes(self):
         script = ROOT / "lint_runner_labels.py"
-        for case, code in (("approved-guard", 0), ("literal-self-hosted", 1)):
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as repository:
+        runs = (("approved-guard", [], 0), ("literal-self-hosted", [], 1), ("issue-comment", [], 0),
+                ("issue-comment", ["--strict-untrusted-events"], 1))
+        for case, options, code in runs:
+            with self.subTest(case=case, options=options), tempfile.TemporaryDirectory() as repository:
                 shutil.copytree(FIXTURES / case, Path(repository) / ".github" / "workflows")
-                result = subprocess.run([sys.executable, "-I", str(script), "--repo", repository],
+                result = subprocess.run([sys.executable, "-I", str(script), "--repo", repository, *options],
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(code, result.returncode, result.stdout + result.stderr)
+
+    def test_advisory_findings_print_warning_annotations(self):
+        script = ROOT / "lint_runner_labels.py"
+        with tempfile.TemporaryDirectory() as repository:
+            shutil.copytree(FIXTURES / "issue-comment", Path(repository) / ".github" / "workflows")
+            result = subprocess.run([sys.executable, "-I", str(script), "--repo", repository, "--annotations"],
+                                    capture_output=True, text=True, check=False)
+        self.assertTrue(result.stdout.startswith("::warning file=.github/workflows/ci.yml,line="), result.stdout)
+        self.assertIn("0 failing, 1 advisory", result.stdout)
 
     def test_missing_pyyaml_fails_with_a_clear_message(self):
         script = ROOT / "lint_runner_labels.py"

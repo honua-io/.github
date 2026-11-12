@@ -6,7 +6,7 @@ Fails when a job that a pull request or `workflow_run` event can reach could res
 
 A job is checked when its workflow is triggered by `pull_request`, `pull_request_target`, `pull_request_review`, `pull_request_review_comment` or `workflow_run`, or by an event anyone can raise on a public repository (`issue_comment`, `issues`, `discussion`, `discussion_comment`); jobs in a local reusable workflow (`uses: ./.github/workflows/...`) inherit the events of the jobs that call them. A job `if:` narrows this per event: `github.event_name` comparisons (case-insensitive) drop events in each `||` branch, and a fork guard applied by every branch that admits an event covers it, also for the workflows that job calls. Conditions the linter cannot read admit every event.
 
-No context field says whether the actor of `issue_comment`, `issues` or `discussion*` is outside the organization, so the only accepted guard for those events is excluding them by name, in the job `if:` or as an `&&` term before the self-hosted choice (`github.event_name != 'issue_comment' && ...`).
+Findings that only `issue_comment`, `issues` or `discussion*` events reach are advisory: printed as warnings and not counted in the exit code, because GitHub runs those workflows from the default branch, so a fork cannot choose their `runs-on`. `--strict-untrusted-events` (reusable workflow input `strict-untrusted-events: true`) makes them fail. No context field says whether the actor of those events is outside the organization, so the fix they suggest is excluding the event by name, in the job `if:` or as an `&&` term before the self-hosted choice (`github.event_name != 'issue_comment' && ...`).
 
 | `runs-on` | Result |
 | --- | --- |
@@ -47,7 +47,7 @@ jobs:
     uses: honua-io/.github/.github/workflows/runner-label-lint.yml@<sha>
 ```
 
-Optional inputs: `allow-labels` and `deny-labels`, newline-separated. The linter needs PyYAML, which the `ubuntu-latest` system Python ships; without it the check fails with a message saying so. The required check context is `runner-label-lint / Runner label lint`. The lint covers the workflow files a branch carries; a PR can still edit its own `pull_request` workflows, so the runner group settings that keep self-hosted runners away from fork pull requests remain the primary control.
+Optional inputs: `allow-labels` and `deny-labels`, newline-separated, and `strict-untrusted-events`. The linter needs PyYAML, which the `ubuntu-latest` system Python ships; without it the check fails with a message saying so. The required check context is `runner-label-lint / Runner label lint`. The lint covers the workflow files a branch carries; a PR can still edit its own `pull_request` workflows, so the runner group settings that keep self-hosted runners away from fork pull requests remain the primary control.
 
 Run locally against a checkout:
 

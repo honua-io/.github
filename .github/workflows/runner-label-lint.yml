@@ -21,6 +21,10 @@ on:
         description: Newline-separated extra labels that are never GitHub-hosted.
         type: string
         default: ""
+      strict-untrusted-events:
+        description: Also fail, rather than warn, on jobs only issue_comment, issues or discussion events reach.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,11 +75,13 @@ jobs:
         env:
           ALLOW_LABELS: ${{ inputs.allow-labels }}
           DENY_LABELS: ${{ inputs.deny-labels }}
+          STRICT_UNTRUSTED_EVENTS: ${{ inputs.strict-untrusted-events }}
           CANDIDATE: ${{ steps.merge.outcome == 'success' && '.runner-label-lint-merge' || '.runner-label-lint-head' }}
         run: |
           [[ -d "$CANDIDATE/.github/workflows" ]] || { echo "::error::no workflow files were checked out"; exit 1; }
           label_options=()
           while IFS= read -r label; do [ -n "$label" ] && label_options+=(--allow-label "$label"); done <<< "$ALLOW_LABELS"
           while IFS= read -r label; do [ -n "$label" ] && label_options+=(--deny-label "$label"); done <<< "$DENY_LABELS"
+          [[ "$STRICT_UNTRUSTED_EVENTS" == true ]] && label_options+=(--strict-untrusted-events)
           python3 -I .runner-label-lint-tool/runner-label-lint/lint_runner_labels.py \
             --repo "$CANDIDATE" --annotations "${label_options[@]}"

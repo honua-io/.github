@@ -31,7 +31,7 @@ def parse_arguments(argv):
     parser.add_argument("--deny-label", action="append", default=[], help="extra label that is never hosted")
     parser.add_argument("--annotations", action="store_true", help="print GitHub error and warning annotations")
     parser.add_argument("--strict-untrusted-events", action="store_true",
-                        help="also fail on issue_comment, issues and discussion findings, which are advisory by default")
+                        help="also fail on findings only untrusted-actor events reach, advisory by default")
     return parser.parse_args(argv)
 
 

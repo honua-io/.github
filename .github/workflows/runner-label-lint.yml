@@ -4,8 +4,8 @@
 # Call it from pull_request_target and from push to the default branch, not from pull_request. For
 # pull_request GitHub runs the caller file as the PR head has it, so a PR could edit or delete the check.
 # For pull_request_target the caller file comes from the base branch. This job checks out only the
-# .github/workflows of the PR merge ref (refs/pull/<n>/merge, falling back to refs/pull/<n>/head when
-# GitHub has no merge ref), from this repository, with persist-credentials: false, and parses those
+# .github/workflows of the PR merge ref (refs/pull/<n>/merge, used only when its second parent is the
+# event's head SHA; otherwise the head SHA itself, with a notice), from this repository, with persist-credentials: false, and parses those
 # files as YAML data; it never runs code from the PR. The linter runs from this workflow's own commit.
 # Pin this file by SHA in callers: nothing here can detect a caller that uses a branch instead.
 name: Runner label lint
@@ -62,11 +62,28 @@ jobs:
           sparse-checkout: .github/workflows/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      # Under pull_request_target, refs/pull/<n>/merge can still point at an older head when the job
+      # starts. Only a merge commit whose second parent is the event's head SHA counts as current.
+      - name: Choose the checkout to lint
+        id: candidate
+        env:
+          MERGE_OUTCOME: ${{ steps.merge.outcome }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merge_parent() { git -C .runner-label-lint-merge cat-file -p HEAD | awk '$1 == "parent" { if (++n == 2) print $2 }'; }
+          if [[ "$MERGE_OUTCOME" == success ]] && { [[ -z "$HEAD_SHA" ]] || [[ "$(merge_parent)" == "$HEAD_SHA" ]]; }; then
+            echo "path=.runner-label-lint-merge" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=.runner-label-lint-head" >> "$GITHUB_OUTPUT"
+            message="The merge ref is missing or not built for head ${HEAD_SHA:-unknown}; linting the PR head instead."
+            echo "::notice::$message"
+            echo "Runner label lint: $message" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Check out the PR head's workflow files as data
-        if: steps.merge.outcome == 'failure' && github.event.pull_request
+        if: steps.candidate.outputs.path == '.runner-label-lint-head' && github.event.pull_request
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ format('refs/pull/{0}/head', github.event.pull_request.number) }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: .runner-label-lint-head
           sparse-checkout: .github/workflows/
           sparse-checkout-cone-mode: false
@@ -76,7 +93,7 @@ jobs:
           ALLOW_LABELS: ${{ inputs.allow-labels }}
           DENY_LABELS: ${{ inputs.deny-labels }}
           STRICT_UNTRUSTED_EVENTS: ${{ inputs.strict-untrusted-events }}
-          CANDIDATE: ${{ steps.merge.outcome == 'success' && '.runner-label-lint-merge' || '.runner-label-lint-head' }}
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
           [[ -d "$CANDIDATE/.github/workflows" ]] || { echo "::error::no workflow files were checked out"; exit 1; }
           label_options=()

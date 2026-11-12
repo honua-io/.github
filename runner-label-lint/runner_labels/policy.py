@@ -17,7 +17,8 @@ WORKFLOW_RUN = "workflow_run"
 # Anyone can trigger these on a public repository and no context field says whether the actor is
 # outside the organization, so no expression guards them: a self-hosted choice must exclude the
 # event by name (`github.event_name != 'issue_comment'`).
-UNTRUSTED_ACTOR_EVENTS = frozenset({"issue_comment", "issues", "discussion", "discussion_comment"})
+UNTRUSTED_ACTOR_EVENTS = frozenset({"issue_comment", "issues", "discussion", "discussion_comment",
+                                    "watch", "fork", "gollum"})
 FORK_REACHABLE_EVENTS = PULL_REQUEST_EVENTS | UNTRUSTED_ACTOR_EVENTS | {WORKFLOW_RUN}
 EVENT_NAME = "github.event_name"
 

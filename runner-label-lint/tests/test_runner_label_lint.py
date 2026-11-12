@@ -87,6 +87,10 @@ class FixtureTests(unittest.TestCase):
         self.assertTrue(finding.is_advisory)
         self.assert_findings("issue-comment-excluded", 0)
 
+    def test_watch_events_are_advisory(self):
+        [finding] = self.assert_findings("watch-event", 1, "label 'honua-light'")
+        self.assertTrue(finding.is_advisory)
+
     def test_pull_request_events_stay_failing_alongside_untrusted_events(self):
         [finding] = self.assert_findings("issue-comment-and-pull-request", 1, "label 'honua-light'")
         self.assertFalse(finding.is_advisory)
@@ -98,6 +102,9 @@ class FixtureTests(unittest.TestCase):
         [finding] = self.assert_findings("remote-reusable-runner", 1, "label 'honua-light'")
         self.assertIn("jobs.light.with.runs-on", finding.message)
         self.assertEqual(12, finding.line)
+
+    def test_ignores_non_runner_arguments_to_other_repositories(self):
+        self.assert_findings("remote-reusable-other-arguments", 0)
 
     def test_job_conditions_recognise_more_guard_shapes(self):
         for case in ("event-name-case", "bare-guard-if", "swapped-guard", "event-branches-if"):

@@ -10,7 +10,7 @@ from .workflows import calls_other_repository
 MAX_RESOLUTION_DEPTH = 4
 MATRIX_REFERENCE = re.compile(r"^matrix\.([A-Za-z_][\w-]*)$")
 INPUT_REFERENCE = re.compile(r"^inputs\.([A-Za-z_][\w-]*)$")
-RUNNER_ARGUMENT = re.compile(r"runner|runs[-_]?on|label", re.IGNORECASE)
+RUNNER_ARGUMENT = re.compile(r"^(?:runner|runs[-_]on)(?:s|[-_]labels?)?$", re.IGNORECASE)
 HOSTED_FALLBACK = "ubuntu-latest"
 
 LABEL_HINT = (f"use a GitHub-hosted label such as {HOSTED_FALLBACK}, or choose the self-hosted label"
@@ -91,8 +91,8 @@ def _check_remote_call(workflow, job_id, job, labels):
 def _check_value(workflow, job, site, labels):
     """Fails on events whose workflow file a PR controls; untrusted-actor events alone are advisory.
 
-    GitHub runs issue_comment, issues and discussion* workflows from the default branch, so a fork cannot
-    choose their runs-on; a self-hosted choice there is still worth a warning.
+    GitHub runs issue_comment, issues, discussion*, watch, fork and gollum workflows from the default
+    branch, so a PR cannot change their runs-on; anyone can still start them, which is worth a warning.
     """
     admission = admit(job.get("if"), workflow.events)
     passes = ((admission.events - UNTRUSTED_ACTOR_EVENTS, FAILING), (admission.events, ADVISORY))

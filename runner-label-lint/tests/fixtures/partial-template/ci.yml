@@ -1,0 +1,7 @@
+on:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-${{ vars.VERSION }}
+    steps:
+      - run: echo ok

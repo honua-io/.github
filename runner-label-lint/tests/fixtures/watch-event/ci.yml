@@ -1,0 +1,6 @@
+on: [watch]
+jobs:
+  build:
+    runs-on: honua-light
+    steps:
+      - run: echo ok

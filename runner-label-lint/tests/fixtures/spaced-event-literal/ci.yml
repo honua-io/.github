@@ -1,0 +1,7 @@
+on: [pull_request]
+jobs:
+  build:
+    if: github.event_name != 'pull_ request'
+    runs-on: self-hosted
+    steps:
+      - run: echo ok

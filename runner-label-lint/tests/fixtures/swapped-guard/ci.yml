@@ -1,0 +1,6 @@
+on: pull_request
+jobs:
+  build:
+    runs-on: ${{ vars.LIGHT && (github.repository == github.event.pull_request.head.repo.full_name || !github.event.pull_request) && fromJSON(vars.LIGHT) || 'ubuntu-latest' }}
+    steps:
+      - run: echo ok

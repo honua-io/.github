@@ -1,0 +1,6 @@
+on: pull_request_target
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - run: echo ok

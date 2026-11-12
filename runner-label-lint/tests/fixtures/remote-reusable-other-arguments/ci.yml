@@ -1,0 +1,9 @@
+on:
+  pull_request:
+jobs:
+  triage:
+    uses: example-org/shared/.github/workflows/triage.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      labels: bug
+      test-runner: pytest
+      runner-count: 2

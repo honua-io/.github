@@ -1,0 +1,8 @@
+on:
+  pull_request:
+jobs:
+  build:
+    runs-on:
+      group: light
+    steps:
+      - run: echo ok

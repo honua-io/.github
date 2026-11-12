@@ -1,0 +1,9 @@
+on:
+  push:
+    branches: [trunk]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - run: echo ok

@@ -1,0 +1,8 @@
+on:
+  workflow_run:
+    workflows: [CI]
+jobs:
+  build:
+    runs-on: ${{ vars.LIGHT && (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.LIGHT) || 'ubuntu-latest' }}
+    steps:
+      - run: echo ok

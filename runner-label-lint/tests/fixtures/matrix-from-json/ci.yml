@@ -1,0 +1,10 @@
+on:
+  pull_request:
+jobs:
+  build:
+    strategy:
+      matrix:
+        runner: ${{ fromJSON(vars.RUNNERS) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - run: echo ok

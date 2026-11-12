@@ -53,7 +53,7 @@ class FixtureTests(unittest.TestCase):
     def test_rejects_unguarded_or_misplaced_guards(self):
         for case in ("unguarded-variable", "guard-not-conjoined"):
             with self.subTest(case=case):
-                self.assert_findings(case, 1, "without the fork guard")
+                self.assert_findings(case, 1, "without a guard")
 
     def test_requires_a_hosted_fallback(self):
         self.assert_findings("no-hosted-fallback", 1, "no GitHub-hosted fallback")
@@ -81,6 +81,23 @@ class FixtureTests(unittest.TestCase):
     def test_reports_file_and_line(self):
         [finding] = self.assert_findings("literal-self-hosted", 1)
         self.assertTrue(str(finding).startswith(".github/workflows/ci.yml:5: jobs.build.runs-on:"))
+
+    def test_untrusted_actor_events_need_an_event_exclusion(self):
+        self.assert_findings("issue-comment", 1, "github.event_name != 'issue_comment'")
+        self.assert_findings("issue-comment-excluded", 0)
+
+    def test_caller_job_guard_covers_the_called_workflow(self):
+        self.assert_findings("reusable-caller-guard", 0)
+
+    def test_checks_runner_arguments_passed_to_other_repositories(self):
+        [finding] = self.assert_findings("remote-reusable-runner", 1, "label 'honua-light'")
+        self.assertIn("jobs.light.with.runs-on", finding.message)
+        self.assertEqual(12, finding.line)
+
+    def test_job_conditions_recognise_more_guard_shapes(self):
+        for case in ("event-name-case", "bare-guard-if", "swapped-guard", "event-branches-if"):
+            with self.subTest(case=case):
+                self.assert_findings(case, 0)
 
 
 class LabelPolicyTests(unittest.TestCase):
@@ -127,6 +144,14 @@ class OutputTests(unittest.TestCase):
                 result = subprocess.run([sys.executable, "-I", str(script), "--repo", repository],
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(code, result.returncode, result.stdout + result.stderr)
+
+    def test_missing_pyyaml_fails_with_a_clear_message(self):
+        script = ROOT / "lint_runner_labels.py"
+        probe = ("import runpy, sys; sys.modules['yaml'] = None; sys.argv = ['lint', '--repo', '.'];"
+                 f" runpy.run_path({str(script)!r}, run_name='__main__')")
+        result = subprocess.run([sys.executable, "-I", "-c", probe], capture_output=True, text=True, check=False)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("PyYAML is not installed", result.stderr)
 
 
 if __name__ == "__main__":

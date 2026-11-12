@@ -10,6 +10,11 @@ import sys
 # Run with python3 -I so the checked repository cannot shadow modules; -I drops this directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+try:
+    import yaml  # noqa: F401 - checked here so a missing PyYAML fails with a clear message
+except ModuleNotFoundError:
+    sys.exit("runner-label-lint: PyYAML is not installed for this Python (apt python3-yaml or pip PyYAML)")
+
 from runner_labels.policy import DEFAULT_DENIED, LabelPolicy
 from runner_labels.runs_on import Finding, check_workflow
 from runner_labels.workflows import load_repository

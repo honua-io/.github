@@ -128,6 +128,11 @@ def local_callee(job):
     return uses[len(LOCAL_CALL_PREFIX):].split("@", 1)[0]
 
 
+def calls_other_repository(job):
+    uses = job.get("uses")
+    return isinstance(uses, str) and not uses.startswith(LOCAL_CALL_PREFIX) and "/.github/workflows/" in uses
+
+
 def _propagate_events(workflows):
     for workflow in workflows.values():
         workflow.events = trigger_events(workflow.document)

@@ -1,0 +1,13 @@
+on:
+  push:
+  workflow_run:
+    workflows: [CI]
+jobs:
+  build:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.head_repository.full_name == github.repository) ||
+      github.event_name == 'push'
+    runs-on: honua-light
+    steps:
+      - run: echo ok

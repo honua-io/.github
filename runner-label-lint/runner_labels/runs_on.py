@@ -4,11 +4,13 @@ from dataclasses import dataclass, replace
 import re
 
 from .expressions import is_compound, split_top_level, string_value, strip_parentheses, unwrap
-from .policy import GUARD_TEXT, LabelPolicy, admit, guards_in, required_guards
+from .policy import LabelPolicy, admit, guard_text, guards_in, narrow_events, required_guards
+from .workflows import calls_other_repository
 
 MAX_RESOLUTION_DEPTH = 4
 MATRIX_REFERENCE = re.compile(r"^matrix\.([A-Za-z_][\w-]*)$")
 INPUT_REFERENCE = re.compile(r"^inputs\.([A-Za-z_][\w-]*)$")
+RUNNER_ARGUMENT = re.compile(r"runner|runs[-_]?on|label", re.IGNORECASE)
 HOSTED_FALLBACK = "ubuntu-latest"
 
 LABEL_HINT = (f"use a GitHub-hosted label such as {HOSTED_FALLBACK}, or choose the self-hosted label"
@@ -36,6 +38,14 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class RunnerSite:
+    """A runs-on value, or a runner argument to another repository's workflow, and where it is."""
+    name: str
+    line: int
+    value: object
+
+
+@dataclass(frozen=True)
 class JobContext:
     workflow: object
     job: dict
@@ -51,29 +61,44 @@ class JobContext:
 def check_workflow(workflow, labels):
     findings = []
     for job_id, job in workflow.jobs():
-        if isinstance(job, dict) and "runs-on" in job:
-            findings += _check_job(workflow, job_id, job, labels)
+        if not isinstance(job, dict):
+            continue
+        if "runs-on" in job:
+            site = RunnerSite(f"jobs.{job_id}.runs-on", job.line("runs-on"), job["runs-on"])
+            findings += _check_value(workflow, job, site, labels)
+        elif calls_other_repository(job):
+            findings += _check_remote_call(workflow, job_id, job, labels)
     return findings
 
 
-def _check_job(workflow, job_id, job, labels):
-    admission = admit(job.get("if"), workflow.events)
-    context = JobContext(workflow, job, admission.events, labels)
-    if not admission.events or context.required <= admission.guards:
+def _check_remote_call(workflow, job_id, job, labels):
+    """Another repository's workflow is not linted here, so check the runner arguments this job passes it."""
+    arguments = job.get("with")
+    if not isinstance(arguments, dict):
         return []
-    problems = runs_on_problems(job["runs-on"], context, admission.guards)
+    sites = [RunnerSite(f"jobs.{job_id}.with.{key}", arguments.line(key), value)
+             for key, value in arguments.items() if isinstance(key, str) and RUNNER_ARGUMENT.search(key)]
+    return [finding for site in sites for finding in _check_value(workflow, job, site, labels)]
+
+
+def _check_value(workflow, job, site, labels):
+    admission = admit(job.get("if"), workflow.events)
+    if not admission.events:
+        return []
+    context = JobContext(workflow, job, admission.events, labels)
+    problems = runs_on_problems(site.value, context, admission.guards)
     if not problems:
         return []
     reasons = "; ".join(dict.fromkeys(problem.reason for problem in problems))
     hints = "; ".join(dict.fromkeys(problem.hint for problem in problems))
-    return [Finding(workflow.path, job.line("runs-on"), f"jobs.{job_id}.runs-on: {reasons}", hints)]
+    return [Finding(workflow.path, site.line, f"{site.name}: {reasons}", hints)]
 
 
 def runs_on_problems(value, context, guards):
     if isinstance(value, list):
         return [problem for item in value for problem in runs_on_problems(item, context, guards)]
     if isinstance(value, dict):
-        return [] if context.required <= guards else [Problem("a runner group is reachable from fork events", GROUP_HINT)]
+        return [] if context.required <= guards else [Problem("a runner group is reachable from fork-reachable events", GROUP_HINT)]
     if not isinstance(value, str):
         return [Problem("runs-on is not a label, list or group", TEMPLATE_HINT)]
     if "${{" not in value:
@@ -101,8 +126,11 @@ def _expression_problems(expression, context, guards):
 
 def _alternative_problems(alternative, context, guards):
     conjuncts = split_top_level(alternative, "&&")
+    events = set(context.events)
+    for conjunct in conjuncts[:-1]:
+        events = narrow_events(conjunct, events)
     established = set(guards).union(*(guards_in(conjunct) for conjunct in conjuncts[:-1]))
-    return _value_problems(conjuncts[-1], context, frozenset(established))
+    return _value_problems(conjuncts[-1], replace(context, events=frozenset(events)), frozenset(established))
 
 
 def _is_hosted_fallback(alternative, context):
@@ -122,8 +150,8 @@ def _value_problems(term, context, guards):
         return _label_problems(literal, context)
     candidates = _resolve(term, context)
     if candidates is None:
-        missing = " && ".join(GUARD_TEXT[kind] for kind in sorted(context.required - guards))
-        return [Problem(f"'{_printable(term)}' can choose a self-hosted runner for fork events without the fork guard",
+        missing = " && ".join(guard_text(kind) for kind in sorted(context.required - guards))
+        return [Problem(f"'{_printable(term)}' can choose a self-hosted runner for fork-reachable events without a guard",
                         f"AND that choice with {missing} and end with || '{HOSTED_FALLBACK}'")]
     return [problem for value, value_context in candidates
             for problem in runs_on_problems(value, value_context, guards)]

@@ -1,0 +1,12 @@
+on:
+  pull_request:
+jobs:
+  hosted:
+    uses: example-org/shared/.github/workflows/build.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      runner: ubuntu-latest
+      scan-type: fs
+  light:
+    uses: example-org/shared/.github/workflows/build.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      runs-on: honua-light

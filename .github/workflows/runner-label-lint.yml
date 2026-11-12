@@ -3,9 +3,11 @@
 #
 # Call it from pull_request_target and from push to the default branch, not from pull_request. For
 # pull_request GitHub runs the caller file as the PR head has it, so a PR could edit or delete the check.
-# For pull_request_target the caller file comes from the base branch. This job checks out only the PR
-# head's .github/workflows with persist-credentials: false and parses those files as YAML data; it never
-# runs code from the PR. Callers pin this file by SHA; the job runs the linter from that same commit.
+# For pull_request_target the caller file comes from the base branch. This job checks out only the
+# .github/workflows of the PR merge ref (refs/pull/<n>/merge, falling back to refs/pull/<n>/head when
+# GitHub has no merge ref), from this repository, with persist-credentials: false, and parses those
+# files as YAML data; it never runs code from the PR. The linter runs from this workflow's own commit.
+# Pin this file by SHA in callers: nothing here can detect a caller that uses a branch instead.
 name: Runner label lint
 
 on:
@@ -29,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require a trusted pinned policy identity
+      # Confirms the linter is checked out from the shared repository at the exact commit GitHub
+      # resolved for this workflow. It does not check how the caller pinned the reference.
+      - name: Resolve the shared linter commit
         env:
           POLICY_REPOSITORY: ${{ job.workflow_repository }}
           POLICY_SHA: ${{ job.workflow_sha }}
@@ -44,12 +48,22 @@ jobs:
           path: .runner-label-lint-tool
           sparse-checkout: runner-label-lint
           persist-credentials: false
-      - name: Check out the candidate workflow files as data
+      - name: Check out the merge result's workflow files as data
+        id: merge
+        continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: .runner-label-lint-candidate
+          ref: ${{ github.event.pull_request && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          path: .runner-label-lint-merge
+          sparse-checkout: .github/workflows/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check out the PR head's workflow files as data
+        if: steps.merge.outcome == 'failure' && github.event.pull_request
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ format('refs/pull/{0}/head', github.event.pull_request.number) }}
+          path: .runner-label-lint-head
           sparse-checkout: .github/workflows/
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -57,9 +71,11 @@ jobs:
         env:
           ALLOW_LABELS: ${{ inputs.allow-labels }}
           DENY_LABELS: ${{ inputs.deny-labels }}
+          CANDIDATE: ${{ steps.merge.outcome == 'success' && '.runner-label-lint-merge' || '.runner-label-lint-head' }}
         run: |
+          [[ -d "$CANDIDATE/.github/workflows" ]] || { echo "::error::no workflow files were checked out"; exit 1; }
           label_options=()
           while IFS= read -r label; do [ -n "$label" ] && label_options+=(--allow-label "$label"); done <<< "$ALLOW_LABELS"
           while IFS= read -r label; do [ -n "$label" ] && label_options+=(--deny-label "$label"); done <<< "$DENY_LABELS"
           python3 -I .runner-label-lint-tool/runner-label-lint/lint_runner_labels.py \
-            --repo .runner-label-lint-candidate --annotations "${label_options[@]}"
+            --repo "$CANDIDATE" --annotations "${label_options[@]}"

@@ -32,7 +32,8 @@ class FixtureTests(unittest.TestCase):
         return findings
 
     def test_rejects_self_hosted_labels_for_pull_request_jobs(self):
-        cases = {"literal-self-hosted": 1, "label-list": 1, "custom-label": 1, "pull-request-target": 1}
+        cases = {"literal-self-hosted": 1, "label-list": 1, "custom-label": 1, "pull-request-target": 1,
+                 "spaced-event-literal": 1}
         for case, count in cases.items():
             with self.subTest(case=case):
                 self.assert_findings(case, count, "is not a GitHub-hosted runner")

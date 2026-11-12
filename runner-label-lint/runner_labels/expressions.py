@@ -86,4 +86,6 @@ def is_compound(term):
 
 
 def compact(term):
-    return re.sub(r"\s+", "", strip_parentheses(term))
+    """Drop whitespace outside quoted literals; whitespace inside a literal is part of its value."""
+    pieces = re.split(r"('(?:[^']|'')*')", strip_parentheses(term))
+    return "".join(piece if piece.startswith("'") else re.sub(r"\s+", "", piece) for piece in pieces)

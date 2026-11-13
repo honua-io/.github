@@ -15,7 +15,7 @@ TICKET = re.compile(
 )
 HISTORY = re.compile(
     r"\b(?:previously|no longer|formerly|(?:was|were) (?:changed|renamed|removed)|used to be|now we|we now"
-    r"|(?:we|it|this|that|they|which) used to|decided|decision|founder|R\d+|rc\.\d+)\b"
+    r"|(?:we|it|this|that|they|which) used to|(?:we|team|founder) decided|decision(?=\s*:)|founder|R\d+|rc\.\d+)\b"
     r"|\b20\d{2}[-/]\d{2}[-/]\d{2}\b",
     re.IGNORECASE,
 )

@@ -38,7 +38,7 @@ def backend_blocks(text):
               if not match.group().startswith(("//", "#", "/*"))]
     blocks = []
     for index, token in enumerate(tokens[:-2]):
-        if token != "backend" or not tokens[index + 1].startswith('"') or tokens[index + 2] != "{":
+        if token != "backend" or not re.fullmatch(r'"(?:\\.|[^"\\])*"|[A-Za-z_][\w-]*', tokens[index + 1]) or tokens[index + 2] != "{":
             continue
         depth = 1
         end = index + 3

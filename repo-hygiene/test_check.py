@@ -134,6 +134,11 @@ class BackendParsingTests(unittest.TestCase):
         self.assertEqual(len(RULES.backend_blocks(text)), 1)
         self.assertIn('"}"', RULES.backend_blocks(text)[0])
 
+    def test_unquoted_backend_labels_are_protected(self):
+        blocks = RULES.backend_blocks('terraform { backend s3 { bucket = "state" } }')
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0][1], 's3')
+
     def test_unterminated_backend_fails_closed(self):
         with self.assertRaises(ValueError):
             RULES.backend_blocks('terraform { backend "s3" {')

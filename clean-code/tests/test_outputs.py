@@ -63,3 +63,11 @@ class DecisionHistory(unittest.TestCase):
             with self.subTest(text=text):
                 found = pull_request.findings({'src/a.py': '# ' + text + '\nvalue = 1\n'})
                 self.assertIn('clean-code/history-comment', rule_keys(found))
+
+    def test_technical_decision_descriptions_are_allowed(self):
+        pull_request = PullRequest({'README.md': 'fixture\n'})
+        self.addCleanup(pull_request.close)
+        for text in ('This decision tree maps request types to handlers.', 'The decision boundary separates classes.'):
+            with self.subTest(text=text):
+                found = pull_request.findings({'src/a.py': '# ' + text + '\nvalue = 1\n'})
+                self.assertNotIn('clean-code/history-comment', rule_keys(found))

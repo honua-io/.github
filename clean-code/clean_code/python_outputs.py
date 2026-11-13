@@ -18,6 +18,14 @@ def output_names(function):
     return visitor.outputs
 
 
+def merge_bindings(endings):
+    merged = {}
+    for ending in endings:
+        for name, values in ending.items():
+            merged.setdefault(name, set()).update(values)
+    return merged
+
+
 class Mutations(ast.NodeVisitor):
     def __init__(self, bindings):
         self.bindings = bindings
@@ -86,6 +94,31 @@ class Mutations(ast.NodeVisitor):
             for name, values in ending.items():
                 self.bindings.setdefault(name, set()).update(values)
         return bool(endings)
+
+    def exception_paths(self, node):
+        initial = {name: values.copy() for name, values in self.bindings.items()}
+        normal = self.statements(node.body) and self.statements(node.orelse)
+        paths = [(self.bindings, normal)]
+        exceptional = merge_bindings([initial, self.bindings])
+        for handler in node.handlers:
+            self.bindings = {name: values.copy() for name, values in exceptional.items()}
+            if handler.name:
+                self.bindings[handler.name] = set()
+            normal = self.statements(handler.body)
+            paths.append((self.bindings, normal))
+        return paths
+
+    def visit_Try(self, node):
+        endings = []
+        for bindings, normal in self.exception_paths(node):
+            self.bindings = {name: values.copy() for name, values in bindings.items()}
+            final_normal = self.statements(node.finalbody)
+            if normal and final_normal:
+                endings.append(self.bindings)
+        self.bindings = merge_bindings(endings)
+        return bool(endings)
+
+    visit_TryStar = visit_Try
 
     def visit_If(self, node):
         self.visit(node.test)

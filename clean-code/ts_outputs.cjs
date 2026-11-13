@@ -5,6 +5,21 @@ const MUTATORS = new Set([
   "add", "set", "delete", "clear",
 ]);
 
+const HANDLERS = new Map([
+  [ts.SyntaxKind.Block, "block"],
+  [ts.SyntaxKind.TryStatement, "tryStatement"],
+  [ts.SyntaxKind.ReturnStatement, "terminate"],
+  [ts.SyntaxKind.ThrowStatement, "terminate"],
+  [ts.SyntaxKind.WhileStatement, "loop"],
+  [ts.SyntaxKind.ForStatement, "loop"],
+  [ts.SyntaxKind.ForOfStatement, "loop"],
+  [ts.SyntaxKind.ForInStatement, "loop"],
+  [ts.SyntaxKind.IfStatement, "branch"],
+  [ts.SyntaxKind.ConditionalExpression, "branch"],
+  [ts.SyntaxKind.VariableDeclaration, "declaration"],
+  [ts.SyntaxKind.BinaryExpression, "assignment"],
+]);
+
 function copyBindings(bindings) {
   return new Map([...bindings].map(([key, values]) => [key, new Set(values)]));
 }
@@ -61,49 +76,88 @@ class Mutations {
     return true;
   }
 
+  collectionLoop(node) {
+    return ts.isForOfStatement(node) || ts.isForInStatement(node);
+  }
+
+  loopTarget(node) {
+    return ts.isVariableDeclarationList(node.initializer)
+      ? node.initializer.declarations[0].name : node.initializer;
+  }
+
   loop(node) {
-    if (node.initializer && !ts.isForOfStatement(node) && !ts.isForInStatement(node)) this.visit(node.initializer);
-    if (node.condition ?? node.expression) this.visit(node.condition ?? node.expression);
+    if (node.initializer && !this.collectionLoop(node)) this.visit(node.initializer);
+    const condition = node.condition ?? node.expression;
+    if (condition) this.visit(condition);
     const initial = copyBindings(this.bindings);
-    if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
-      const target = ts.isVariableDeclarationList(node.initializer)
-        ? node.initializer.declarations[0].name : node.initializer;
-      this.bind(target, undefined);
-    }
+    if (this.collectionLoop(node)) this.bind(this.loopTarget(node), undefined);
     const fallsThrough = this.visit(node.statement) !== false;
     if (node.incrementor && fallsThrough) this.visit(node.incrementor);
     this.bindings = mergeBindings(fallsThrough ? [initial, this.bindings] : [initial]);
   }
 
+  exceptionPaths(node) {
+    const initial = copyBindings(this.bindings);
+    const normal = this.visit(node.tryBlock) !== false;
+    const paths = [{ bindings: this.bindings, normal }];
+    if (node.catchClause) {
+      this.bindings = mergeBindings([initial, this.bindings]);
+      if (node.catchClause.variableDeclaration) this.bind(node.catchClause.variableDeclaration.name, undefined);
+      const normal = this.visit(node.catchClause.block) !== false;
+      paths.push({ bindings: this.bindings, normal });
+    }
+    return paths;
+  }
+
+  tryStatement(node) {
+    const endings = [];
+    for (const path of this.exceptionPaths(node)) {
+      this.bindings = copyBindings(path.bindings);
+      const normal = !node.finallyBlock || this.visit(node.finallyBlock) !== false;
+      if (normal && path.normal) endings.push(this.bindings);
+    }
+    this.bindings = mergeBindings(endings);
+    return endings.length > 0;
+  }
+
   assignment(node) {
+    if (node.operatorToken.kind < ts.SyntaxKind.FirstAssignment
+        || node.operatorToken.kind > ts.SyntaxKind.LastAssignment) {
+      ts.forEachChild(node, (child) => { this.visit(child); });
+      return;
+    }
     this.visit(node.right);
     this.visit(node.left);
     this.mark(node.left);
     if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) this.bind(node.left, node.right);
   }
 
+  block(node) {
+    return this.statements(node.statements);
+  }
+
+  terminate(node) {
+    if (node.expression) this.visit(node.expression);
+    return false;
+  }
+
+  branch(node) {
+    this.visit(node.expression ?? node.condition);
+    return this.branches([node.thenStatement ?? node.whenTrue, node.elseStatement ?? node.whenFalse]);
+  }
+
+  declaration(node) {
+    if (!node.initializer) return;
+    this.visit(node.initializer);
+    this.bind(node.name, node.initializer);
+  }
+
   visit(node) {
-    if (ts.isBlock(node)) return this.statements(node.statements);
-    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
-      if (node.expression) this.visit(node.expression);
-      return false;
-    }
-    if (ts.isWhileStatement(node) || ts.isForStatement(node)
-        || ts.isForOfStatement(node) || ts.isForInStatement(node)) return this.loop(node);
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
-    if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
-      this.visit(node.expression ?? node.condition);
-      return this.branches([node.thenStatement ?? node.whenTrue, node.elseStatement ?? node.whenFalse]);
-    }
-    if (ts.isVariableDeclaration(node) && node.initializer) {
-      this.visit(node.initializer);
-      this.bind(node.name, node.initializer);
-      return;
-    }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) return this.assignment(node);
+    const handler = HANDLERS.get(node.kind);
+    if (handler) return this[handler](node);
     this.mutation(node);
-    ts.forEachChild(node, (child) => this.visit(child));
+    ts.forEachChild(node, (child) => { this.visit(child); });
   }
 
   mutation(node) {

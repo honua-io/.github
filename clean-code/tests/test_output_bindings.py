@@ -52,6 +52,27 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(loop=loop):
                 self.assertEqual(self.outputs('a.ts', source), {'items'})
 
+    def test_exception_paths_preserve_possible_input_mutations(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    try:\n        may_fail()\n    except ValueError:\n        items = []\n    items.clear()\n'),
+            ('a.ts', 'function collect(items: number[]) { try { mayFail(); } catch { items = []; } items.push(1); }'),
+            ('a.ts', 'function collect(items: number[]) { try { mayFail(); } catch { items.push(1); } }'),
+            ('a.ts', 'function collect(items: number[]) { try { return; } finally { items.push(1); } }'),
+            ('a.py', 'def collect(items):\n    try:\n        return\n    finally:\n        items.clear()\n'),
+        ]
+        for path, source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(self.outputs(path, source), {'items'})
+
+    def test_finally_rebinding_applies_to_all_continuing_paths(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    try:\n        may_fail()\n    finally:\n        items = []\n    items.clear()\n'),
+            ('a.ts', 'function collect(items: number[]) { try { mayFail(); } finally { items = []; } items.push(1); }'),
+        ]
+        for path, source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(self.outputs(path, source), set())
+
     def test_comprehension_does_not_hide_outer_input_after_its_scope(self):
         source = 'def collect(items):\n    values = [items for items in []]\n    items.clear()\n'
         self.assertEqual(self.outputs('a.py', source), {'items'})

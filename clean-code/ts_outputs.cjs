@@ -1,5 +1,6 @@
 // Resolve lexical bindings before tracking direct mutations of caller-owned collections.
 const ts = require("typescript");
+const { unwrap, copyBindings, sameBindings, mergeBindings, patternEntries, loopLabels, mutatorName } = require("./ts_output_support.cjs");
 const MUTATORS = new Set([
   "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin",
   "add", "set", "delete", "clear",
@@ -7,6 +8,7 @@ const MUTATORS = new Set([
 
 const HANDLERS = new Map([
   [ts.SyntaxKind.Block, "block"],
+  [ts.SyntaxKind.LabeledStatement, "labeled"],
   [ts.SyntaxKind.CallExpression, "call"],
   [ts.SyntaxKind.TryStatement, "tryStatement"],
   [ts.SyntaxKind.SwitchStatement, "switchStatement"],
@@ -24,32 +26,6 @@ const HANDLERS = new Map([
   [ts.SyntaxKind.VariableDeclaration, "declaration"],
   [ts.SyntaxKind.BinaryExpression, "assignment"],
 ]);
-
-function unwrap(node) {
-  while (node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
-      || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)
-      || ts.isSatisfiesExpression(node))) node = node.expression;
-  return node;
-}
-
-function copyBindings(bindings) {
-  return new Map([...bindings].map(([key, values]) => [key, new Set(values)]));
-}
-
-function sameBindings(left, right) {
-  return left.size === right.size && [...left].every(([key, values]) =>
-    values.size === right.get(key)?.size && [...values].every((value) => right.get(key).has(value)));
-}
-
-function mergeBindings(endings) {
-  const merged = new Map();
-  for (const ending of endings) {
-    for (const [symbol, names] of ending) {
-      merged.set(symbol, new Set([...(merged.get(symbol) ?? []), ...names]));
-    }
-  }
-  return merged;
-}
 
 class Mutations {
   constructor(functionNode, checker) {
@@ -72,9 +48,9 @@ class Mutations {
   }
 
   bind(target, value) {
-    target = unwrap(target);
-    if (ts.isIdentifier(target)) {
-      this.bindings.set(this.checker.getSymbolAtLocation(target), this.aliases(value));
+    const entries = patternEntries(target, value).map(([name, source]) => [name, this.aliases(source)]);
+    for (const [name, aliases] of entries) {
+      if (ts.isIdentifier(name)) this.bindings.set(this.checker.getSymbolAtLocation(name), aliases);
     }
   }
 
@@ -139,7 +115,7 @@ class Mutations {
     }
     const { normal, exits } = this.capturedBlock(node.statement);
     const continuing = normal ? [this.bindings] : [];
-    for (const exit of exits) this.loopExit(exit, { broken, continuing });
+    for (const exit of exits) this.loopExit(exit, { broken, continuing, labels: loopLabels(node) });
     this.bindings = mergeBindings(continuing);
     if (!continuing.length) return broken;
     if (node.incrementor) this.visit(node.incrementor);
@@ -149,7 +125,9 @@ class Mutations {
   }
 
   loopExit(exit, paths) {
-    if (exit.kind === "break") paths.broken.push(exit.bindings);
+    if (exit.label && !paths.labels.has(exit.label)) {
+      if (this.exits.length) this.exits.at(-1).push(exit);
+    } else if (exit.kind === "break") paths.broken.push(exit.bindings);
     else if (exit.kind === "continue") paths.continuing.push(exit.bindings);
     else if (this.exits.length) this.exits.at(-1).push(exit);
   }
@@ -193,7 +171,7 @@ class Mutations {
     if (!this.exits.length) return;
     this.exits.at(-1).push(...final.exits);
     if (final.normal && !path.normal) {
-      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), kind: path.kind });
+      this.exits.at(-1).push({ ...path, bindings: copyBindings(this.bindings) });
     }
   }
 
@@ -225,6 +203,11 @@ class Mutations {
   }
 
   evaluatedReceiver(target) {
+    const entries = patternEntries(target, undefined);
+    return new Set(entries.flatMap(([entry]) => [...this.directReceiver(entry)]));
+  }
+
+  directReceiver(target) {
     target = unwrap(target);
     if (!ts.isElementAccessExpression(target) && !ts.isPropertyAccessExpression(target)) {
       this.visit(target);
@@ -261,10 +244,21 @@ class Mutations {
     const exits = this.exits.pop();
     const endings = normal ? [this.bindings] : [];
     for (const exit of exits) {
-      if (exit.kind === "break") endings.push(exit.bindings);
+      if (exit.kind === "break" && !exit.label) endings.push(exit.bindings);
       else if (this.exits.length) this.exits.at(-1).push(exit);
     }
     return endings;
+  }
+
+  labeled(node) {
+    const { normal, exits } = this.capturedBlock(node.statement);
+    const endings = normal ? [this.bindings] : [];
+    for (const exit of exits) {
+      if (exit.kind === "break" && exit.label === node.label.text) endings.push(exit.bindings);
+      else if (this.exits.length) this.exits.at(-1).push(exit);
+    }
+    this.bindings = mergeBindings(endings);
+    return endings.length > 0;
   }
 
   block(node) {
@@ -274,7 +268,7 @@ class Mutations {
   terminate(node) {
     if (node.expression) this.visit(node.expression);
     if (this.exits.length) {
-      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), kind: ts.tokenToString(node.kind) ?? ts.SyntaxKind[node.kind].replace("Statement", "").toLowerCase() });
+      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), label: node.label?.text, kind: ts.tokenToString(node.kind) ?? ts.SyntaxKind[node.kind].replace("Statement", "").toLowerCase() });
     }
     return false;
   }
@@ -309,7 +303,7 @@ class Mutations {
   call(node) {
     this.visit(node.expression);
     const callee = unwrap(node.expression);
-    const receiver = ts.isPropertyAccessExpression(callee) && MUTATORS.has(callee.name.text)
+    const receiver = MUTATORS.has(mutatorName(callee))
       ? this.aliases(callee.expression) : new Set();
     for (const argument of node.arguments) this.visit(argument);
     this.record(receiver);

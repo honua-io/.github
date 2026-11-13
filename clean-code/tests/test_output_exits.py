@@ -93,3 +93,24 @@ class OutputExits(OutputAssertions):
             with self.subTest(source=source):
                 self.assertEqual(self.outputs(path, source), set())
 
+    def test_labeled_continue_reaches_outer_iteration(self):
+        for control in ('continue outer', 'try { continue outer; } finally {}'):
+            source = f'''function collect(items) {{
+                let alias = [];
+                outer: for (let i=0; i<2; i++) {{
+                    for (let j=0; j<2; j++) {{ alias = items; {control}; }}
+                    alias = [];
+                }}
+                alias.push(1);
+            }}'''
+            self.assertEqual(self.outputs('a.ts', source), {'items'})
+
+    def test_labeled_break_skips_unreachable_rebinding(self):
+        for body in ('for (;;) { alias = items; break outer; }',
+                     'switch (1) { default: alias = items; break outer; }'):
+            source = f'function collect(items) {{ let alias = []; outer: {{ {body} alias = []; }} alias.push(1); }}'
+            self.assertEqual(self.outputs('a.ts', source), {'items'})
+
+    def test_labeled_break_preserves_safe_rebinding(self):
+        source = 'function collect(items) { let alias = items; outer: { alias = []; break outer; } alias.push(1); }'
+        self.assertEqual(self.outputs('a.ts', source), set())

@@ -1,6 +1,7 @@
 // Resolve lexical bindings before tracking direct mutations of caller-owned collections.
 const ts = require("typescript");
-const { unwrap, copyBindings, sameBindings, mergeBindings, patternEntries, loopLabels, mutatorName } = require("./ts_output_support.cjs");
+const { unwrap, copyBindings, sameBindings, mergeBindings, loopLabels, mutatorName } = require("./ts_output_support.cjs");
+const { Patterns, isPattern } = require("./ts_output_patterns.cjs");
 const MUTATORS = new Set([
   "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin",
   "add", "set", "delete", "clear",
@@ -43,14 +44,21 @@ class Mutations {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       return this.aliases(node.right);
     }
-    const symbol = ts.isIdentifier(node) ? this.checker.getSymbolAtLocation(node) : undefined;
+    const symbol = ts.isIdentifier(node) ? this.aliasSymbol(node) : undefined;
     return new Set(symbol ? this.bindings.get(symbol) ?? [] : []);
   }
 
+  aliasSymbol(node) {
+    return ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+      ? this.checker.getShorthandAssignmentValueSymbol(node.parent) : this.checker.getSymbolAtLocation(node);
+  }
+
   bind(target, value) {
-    const entries = patternEntries(target, value).map(([name, source]) => [name, this.aliases(source)]);
-    for (const [name, aliases] of entries) {
-      if (ts.isIdentifier(name)) this.bindings.set(this.checker.getSymbolAtLocation(name), aliases);
+    if (isPattern(target)) {
+      const patterns = new Patterns(this);
+      patterns.assign(target, patterns.snapshot(value));
+    } else if (ts.isIdentifier(unwrap(target))) {
+      this.bindings.set(this.checker.getSymbolAtLocation(unwrap(target)), this.aliases(value));
     }
   }
 
@@ -110,7 +118,7 @@ class Mutations {
     const broken = [];
     if (this.collectionLoop(node)) {
       const target = this.loopTarget(node);
-      this.record(this.evaluatedReceiver(target));
+      if (!isPattern(target)) this.record(this.directReceiver(target));
       this.bind(target, undefined);
     }
     const { normal, exits } = this.capturedBlock(node.statement);
@@ -187,7 +195,12 @@ class Mutations {
       ts.forEachChild(node, (child) => { this.visit(child); });
       return;
     }
-    const receiver = this.evaluatedReceiver(node.left);
+    if (isPattern(node.left) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const patterns = new Patterns(this);
+      patterns.assign(node.left, patterns.evaluate(node.right));
+      return;
+    }
+    const receiver = this.directReceiver(node.left);
     if ([ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
       ts.SyntaxKind.QuestionQuestionEqualsToken].includes(node.operatorToken.kind)) {
       const skipped = copyBindings(this.bindings);
@@ -200,11 +213,6 @@ class Mutations {
     this.visit(node.right);
     this.record(receiver);
     if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) this.bind(node.left, node.right);
-  }
-
-  evaluatedReceiver(target) {
-    const entries = patternEntries(target, undefined);
-    return new Set(entries.flatMap(([entry]) => [...this.directReceiver(entry)]));
   }
 
   directReceiver(target) {
@@ -280,6 +288,11 @@ class Mutations {
 
   declaration(node) {
     if (!node.initializer) return;
+    if (isPattern(node.name)) {
+      const patterns = new Patterns(this);
+      patterns.assign(node.name, patterns.evaluate(node.initializer));
+      return;
+    }
     this.visit(node.initializer);
     this.bind(node.name, node.initializer);
   }

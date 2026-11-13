@@ -79,3 +79,43 @@ class OutputTargets(OutputAssertions):
         ]:
             with self.subTest(statement=statement):
                 self.assertEqual(self.outputs('a.ts', f'function collect(items, other) {{ {statement}; }}'), expected)
+
+    def test_equivalent_object_keys_preserve_aliases(self):
+        for target, source in [('value', '"value"'), ('"value"', 'value'),
+                               ('["value"]', 'value'), ('value', '["value"]'),
+                               ('1', '1e0'), ('[1]', '"1"')]:
+            with self.subTest(target=target, source=source):
+                body = f'const {{{target}: alias}} = {{{source}: items}}; alias.push(1);'
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), {'items'})
+
+    def test_wrapped_and_spread_source_snapshots(self):
+        for source in ['(copy = [items, items = []])', '[items, items = [], ...[]]',
+                       '[...[items, items = []]]', '[...[], items, items = []]']:
+            with self.subTest(source=source):
+                body = f'let copy; const [alias] = {source}; alias.push(1);'
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), {'items'})
+        body = 'let copy; const {value: alias} = (copy = {...{value: items}, reset: items = []}); alias.push(1);'
+        self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), {'items'})
+
+    def test_known_values_skip_defaults(self):
+        for value in ['true', 'false', 'null', '0', '""', '[]', '{}']:
+            with self.subTest(value=value):
+                body = f'const [value = items.pop()] = [{value}];'
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), set())
+
+    def test_shadowed_undefined_preserves_aliases(self):
+        body = 'const undefined = items; const [alias = []] = [undefined]; alias.push(1);'
+        self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), {'items'})
+        body = 'const [alias = []] = [undefined]; alias.push(1);'
+        self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), set())
+
+    def test_spread_sources_preserve_default_selection(self):
+        for body, expected in [
+            ('const [value = items.pop()] = [...[], undefined]', {'items'}),
+            ('const [value = items.pop()] = [...[false]]', set()),
+            ('const [...[value = items.pop()]] = [...[]]', {'items'}),
+            ('const {value = items.pop()} = {...{value: false}}', set()),
+            ('const [value = items.pop()] = [...other]', {'items'}),
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items, other) {{ {body} }}'), expected)

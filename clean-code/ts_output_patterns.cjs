@@ -7,6 +7,14 @@ function isPattern(node) {
     || ts.isObjectLiteralExpression(node) || ts.isObjectBindingPattern(node);
 }
 
+function propertyKey(node) {
+  const computed = ts.isComputedPropertyName(node);
+  if (computed) node = unwrap(node.expression);
+  if (ts.isIdentifier(node)) return computed ? undefined : node.text;
+  if (ts.isNumericLiteral(node)) return String(Number(node.text));
+  if (ts.isStringLiteralLike(node)) return node.text;
+}
+
 class Patterns {
   constructor(mutations) {
     this.mutations = mutations;
@@ -14,28 +22,54 @@ class Patterns {
 
   evaluate(node) {
     node = unwrap(node);
-    if (ts.isArrayLiteralExpression(node) && !node.elements.some(ts.isSpreadElement)) {
-      return { aliases: new Set(), state: "present", elements: node.elements.map((entry) =>
-        ts.isOmittedExpression(entry) ? this.snapshot() : this.evaluate(entry)) };
-    }
+    if (ts.isArrayLiteralExpression(node)) return this.evaluateArray(node);
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
       this.mutations.visit(node.left);
       return this.evaluate(node.right);
     }
-    if (ts.isObjectLiteralExpression(node) && !node.properties.some(ts.isSpreadAssignment)) {
-      return this.evaluateObject(node);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const assign = this.setter(node.left);
+      const value = this.evaluate(node.right);
+      assign(value);
+      return value;
     }
+    if (ts.isObjectLiteralExpression(node)) return this.evaluateObject(node);
     this.mutations.visit(node);
     return this.snapshot(node);
   }
 
-  evaluateObject(node) {
-    const properties = new Map();
-    for (const entry of node.properties) {
-      if (ts.isComputedPropertyName(entry.name)) this.mutations.visit(entry.name.expression);
-      properties.set(entry.name.getText(), this.evaluate(entry.initializer ?? entry.name));
+  evaluateArray(node) {
+    const value = { aliases: new Set(), state: "present", elements: [] };
+    for (const entry of node.elements) {
+      const spread = ts.isSpreadElement(entry);
+      const item = ts.isOmittedExpression(entry) ? this.snapshot() : this.evaluate(spread ? entry.expression : entry);
+      if (value.unknownElements) continue;
+      if (spread && item.elements) value.elements.push(...item.elements);
+      else if (spread) value.unknownElements = true;
+      else value.elements.push(item);
+      if (spread && item.unknownElements) value.unknownElements = true;
     }
-    return { aliases: new Set(), state: "present", properties };
+    return value;
+  }
+
+  evaluateObject(node) {
+    const value = { aliases: new Set(), state: "present", properties: new Map() };
+    for (const entry of node.properties) {
+      if (ts.isSpreadAssignment(entry)) {
+        const spread = this.evaluate(entry.expression);
+        if (!spread.properties || spread.unknownProperties) {
+          value.properties.clear();
+          value.unknownProperties = true;
+        }
+        for (const [key, item] of spread.properties ?? []) value.properties.set(key, item);
+        continue;
+      }
+      if (ts.isComputedPropertyName(entry.name)) this.mutations.visit(entry.name.expression);
+      const item = this.evaluate(entry.initializer ?? entry.name);
+      const key = propertyKey(entry.name);
+      if (key !== undefined) value.properties.set(key, item);
+    }
+    return value;
   }
 
   snapshot(node) {
@@ -49,10 +83,12 @@ class Patterns {
       value.elements = node.elements.map((entry) => ts.isOmittedExpression(entry) ? this.snapshot() : this.snapshot(entry));
       value.state = "present";
     } else if (ts.isObjectLiteralExpression(node)) {
-      value.properties = new Map(node.properties.map((entry) => [entry.name?.getText(), this.snapshot(entry.initializer ?? entry.name)]));
+      value.properties = new Map(node.properties.filter((entry) => entry.name).map((entry) => [propertyKey(entry.name), this.snapshot(entry.initializer ?? entry.name)]));
       value.state = "present";
-    } else if (ts.isLiteralExpression(node) || node.kind === ts.SyntaxKind.NullKeyword) value.state = "present";
-    else if (ts.isVoidExpression(node) || ts.isIdentifier(node) && node.text === "undefined") value.state = "missing";
+    } else if (ts.isLiteralExpression(node) || [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword,
+      ts.SyntaxKind.FalseKeyword].includes(node.kind)) value.state = "present";
+    else if (ts.isVoidExpression(node) || ts.isIdentifier(node) && node.text === "undefined"
+      && !this.mutations.aliasSymbol(node)?.declarations?.length) value.state = "missing";
     return value;
   }
 
@@ -100,9 +136,15 @@ class Patterns {
       if (ts.isSpreadElement(entry) || ts.isBindingElement(entry) && entry.dotDotDotToken) {
         const rest = { aliases: new Set(), state: "present" };
         if (source.elements) rest.elements = source.elements.slice(index);
+        rest.unknownElements = source.unknownElements;
         this.assign(entry.expression ?? entry.name, rest);
-      } else this.assign(entry, source.elements ? source.elements[index] ?? this.snapshot() : { aliases: new Set(), state: "unknown" });
+      } else this.assign(entry, this.element(source, index));
     });
+  }
+
+  element(source, index) {
+    if (source.elements?.[index]) return source.elements[index];
+    return source.elements && !source.unknownElements ? this.snapshot() : { aliases: new Set(), state: "unknown" };
   }
 
   object(target, source) {
@@ -110,13 +152,16 @@ class Patterns {
     const remaining = source.properties ? new Map(source.properties) : undefined;
     for (const entry of entries) {
       if (ts.isSpreadAssignment(entry) || entry.dotDotDotToken) {
-        this.assign(entry.expression ?? entry.name, { aliases: new Set(), state: "present", properties: remaining });
+        this.assign(entry.expression ?? entry.name, { aliases: new Set(), state: "present", properties: remaining,
+          unknownProperties: source.unknownProperties });
         continue;
       }
       const key = entry.propertyName ?? entry.name;
       if (ts.isComputedPropertyName(key)) this.mutations.visit(key.expression);
-      const value = source.properties ? source.properties.get(key.getText()) ?? this.snapshot() : { aliases: new Set(), state: "unknown" };
-      remaining?.delete(key.getText());
+      const name = propertyKey(key);
+      const value = source.properties?.get(name) ?? (source.properties && !source.unknownProperties
+        && name !== undefined ? this.snapshot() : { aliases: new Set(), state: "unknown" });
+      remaining?.delete(name);
       this.objectEntry(entry, value);
     }
   }

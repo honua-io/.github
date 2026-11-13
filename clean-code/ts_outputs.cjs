@@ -13,7 +13,7 @@ class Mutations {
   constructor(functionNode, checker) {
     this.checker = checker;
     this.outputs = new Set();
-    this.bindings = new Map(functionNode.parameters.map((parameter) => [
+    this.bindings = new Map(functionNode.parameters.filter((parameter) => ts.isIdentifier(parameter.name)).map((parameter) => [
       checker.getSymbolAtLocation(parameter.name), new Set([parameter.name.getText()]),
     ]));
   }
@@ -21,7 +21,7 @@ class Mutations {
   aliases(node) {
     if (ts.isParenthesizedExpression(node)) return this.aliases(node.expression);
     const symbol = ts.isIdentifier(node) ? this.checker.getSymbolAtLocation(node) : undefined;
-    return new Set(this.bindings.get(symbol) ?? []);
+    return new Set(symbol ? this.bindings.get(symbol) ?? [] : []);
   }
 
   bind(target, value) {

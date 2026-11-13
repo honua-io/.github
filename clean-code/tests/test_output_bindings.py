@@ -14,6 +14,8 @@ class OutputBindings(unittest.TestCase):
             ('a.py', 'def collect(items):\n    return [items.append(1) for items in [[], []]]\n'),
             ('a.ts', 'function collect(items: number[]) { items = [...items]; items.push(1); }'),
             ('a.ts', 'function collect(items: number[]) { { const items: number[] = []; items.push(1); } }'),
+            ('a.cjs', 'class C { constructor(checker) { this.checker = checker; } }'),
+            ('a.cjs', 'function collect({items}) { const local = []; local.push(1); }'),
         ]
         for path, source in cases:
             with self.subTest(source=source):

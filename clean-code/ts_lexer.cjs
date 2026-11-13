@@ -103,7 +103,7 @@ function lex({ path, text }) {
     getCanonicalFileName: (name) => name, useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n", getDefaultLibFileName: () => "",
   };
-  const checker = ts.createProgram([path], { noLib: true, noResolve: true }, host).getTypeChecker();
+  const checker = ts.createProgram([path], { noLib: true, noResolve: true, allowJs: true }, host).getTypeChecker();
   const diagnostics = source.parseDiagnostics ?? [];
   const error = diagnostics.length ? ts.flattenDiagnosticMessageText(diagnostics[0].messageText, " ") : null;
   return { tokens: collectTokens(source), comments: collectComments(source), functions: collectFunctions(source, checker), error };

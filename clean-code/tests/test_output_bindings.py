@@ -8,6 +8,50 @@ class OutputBindings(unittest.TestCase):
         functions = lex_files({path: source})[path].functions
         return {parameter.name for function in functions for parameter in function.parameters if parameter.is_output}
 
+    def test_chained_comparison_rebinding_can_be_skipped(self):
+        cases = [
+            ('flag == 0 == (items := [])', {'items'}),
+            ('(items := []) == 0 == flag', set()),
+            ('flag == (items := [])', set()),
+        ]
+        for condition, expected in cases:
+            source = f'def collect(items, flag):\n    match items:\n        case _ if {condition}: pass\n    items.clear()\n'
+            with self.subTest(condition=condition):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
+    def test_typescript_do_loop_aliases_reach_later_iterations(self):
+        cases = [
+            ('let alias = []; do { alias.push(1); alias = items; } while(n-- > 0);', {'items'}),
+            ('do { items = []; } while(n-- > 0); items.push(1);', set()),
+            ('do { items = []; break; } while(n-- > 0); items.push(1);', set()),
+            ('let alias = []; do { alias = items; continue; } while(n-- > 0); alias.push(1);', {'items'}),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items, n) {{ {body} }}'), expected)
+
+    def test_typescript_assertions_preserve_aliases(self):
+        for expression in ('items as number[]', '<number[]>items', 'items!', 'items satisfies number[]'):
+            source = f'function collect(items: number[]) {{ const alias = {expression}; alias.push(1); }}'
+            with self.subTest(expression=expression):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+        source = 'function collect(items: number[]) { const alias = [...items] as number[]; alias.push(1); }'
+        self.assertEqual(self.outputs('a.ts', source), set())
+
+    def test_comprehension_walrus_updates_enclosing_aliases(self):
+        cases = [
+            ('alias = []', '[(alias := items) for index in range(1)]', 'alias.clear()', {'items'}),
+            ('alias = items', '[(alias := []) for index in range(0)]', 'alias.clear()', {'items'}),
+            ('alias = []', '[(alias := items) for index in range(1) if flag]', 'alias.clear()', {'items'}),
+            ('alias = []', '{index: (alias := items) for index in range(1)}', 'alias.clear()', {'items'}),
+            ('alias = []', '[alias.clear() or (alias := items) for index in range(2)]', 'pass', {'items'}),
+            ('alias = []', '[items.clear() for items in [[]]]', 'alias.clear()', set()),
+        ]
+        for setup, expression, ending, expected in cases:
+            source = f'def collect(items, flag):\n    {setup}\n    values = {expression}\n    {ending}\n'
+            with self.subTest(expression=expression):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
     def test_irrefutable_match_guard_rebinding_applies_to_continuing_paths(self):
         cases = [
             ('_ if (items := [])', set()),

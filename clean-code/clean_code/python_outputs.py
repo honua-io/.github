@@ -111,6 +111,12 @@ class Mutations(ast.NodeVisitor):
         for value in node.values[1:]:
             self.branches([[], [value]])
 
+    def visit_Compare(self, node):
+        self.visit(node.left)
+        self.visit(node.comparators[0])
+        for comparator in node.comparators[1:]:
+            self.branches([[], [comparator]])
+
     def visit_IfExp(self, node):
         self.visit(node.test)
         self.branches([[node.body], [node.orelse]])
@@ -267,14 +273,21 @@ class Mutations(ast.NodeVisitor):
         return self.loop_else(node.orelse, broken)
 
     def comprehension(self, node):
-        saved = self.bindings.copy()
+        self.visit(node.generators[0].iter)
+        saved = merge_bindings([self.bindings])
+        values = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+        body = [ast.Expr(value=value) for value in values]
+        for index in reversed(range(len(node.generators))):
+            generator = node.generators[index]
+            for condition in reversed(generator.ifs):
+                body = [ast.If(test=condition, body=body, orelse=[])]
+            iterable = generator.iter if index else ast.Constant(None)
+            body = [ast.For(target=generator.target, iter=iterable, body=body, orelse=[])]
+        self.statements(body)
         for generator in node.generators:
-            self.visit(generator.iter)
-            self.bind(generator.target, set())
-            self.statements(generator.ifs)
-        if isinstance(node, ast.DictComp):
-            self.visit(node.key)
-            self.visit(node.value)
-        else:
-            self.visit(node.elt)
-        self.bindings = saved
+            for target in ast.walk(generator.target):
+                if isinstance(target, ast.Name):
+                    if target.id in saved:
+                        self.bindings[target.id] = saved[target.id]
+                    else:
+                        self.bindings.pop(target.id, None)

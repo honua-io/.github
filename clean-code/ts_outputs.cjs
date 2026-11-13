@@ -15,6 +15,7 @@ const HANDLERS = new Map([
   [ts.SyntaxKind.BreakStatement, "terminate"],
   [ts.SyntaxKind.ContinueStatement, "terminate"],
   [ts.SyntaxKind.WhileStatement, "loop"],
+  [ts.SyntaxKind.DoStatement, "loop"],
   [ts.SyntaxKind.ForStatement, "loop"],
   [ts.SyntaxKind.ForOfStatement, "loop"],
   [ts.SyntaxKind.ForInStatement, "loop"],
@@ -55,7 +56,9 @@ class Mutations {
 
   aliases(node) {
     if (!node) return new Set();
-    if (ts.isParenthesizedExpression(node)) return this.aliases(node.expression);
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+        || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)
+        || ts.isSatisfiesExpression(node)) return this.aliases(node.expression);
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       return this.aliases(node.right);
     }
@@ -109,8 +112,8 @@ class Mutations {
   loop(node) {
     if (node.initializer && !this.collectionLoop(node)) this.visit(node.initializer);
     const condition = node.condition ?? node.expression;
-    if (condition) this.visit(condition);
-    const broken = [];
+    if (condition && !ts.isDoStatement(node)) this.visit(condition);
+    const broken = ts.isDoStatement(node) ? this.loopIteration(node) : [];
     let initial;
     do {
       initial = copyBindings(this.bindings);

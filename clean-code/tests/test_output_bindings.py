@@ -38,6 +38,44 @@ class OutputBindings(unittest.TestCase):
         source = 'function collect(items: number[]) { const alias = [...items] as number[]; alias.push(1); }'
         self.assertEqual(self.outputs('a.ts', source), set())
 
+    def test_typescript_loop_conditions_are_evaluated(self):
+        cases = [
+            ('do {} while(items.pop());', {'items'}),
+            ('do { continue; } while(items.pop());', {'items'}),
+            ('do {} while((items = []).length); items.push(1);', set()),
+            ('while(items.pop()) {}', {'items'}),
+            ('while(flag) { items = []; } items.push(1);', {'items'}),
+            ('do { break; } while(items.pop());', set()),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items, flag) {{ {body} }}'), expected)
+
+    def test_typescript_asserted_assignment_targets(self):
+        cases = [
+            ('(items[0] as number) = 1;', {'items'}),
+            ('(<number>items[0])++;', {'items'}),
+            ('delete (items[0])!;', {'items'}),
+            ('(items as number[]) = []; items.push(1);', set()),
+            ('(items!) = []; items.push(1);', set()),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items: number[]) {{ {body} }}'), expected)
+
+    def test_generator_creation_only_evaluates_outer_iterable(self):
+        cases = [
+            ('alias = []', '((alias := items) for _ in [0])', 'alias.clear()', set()),
+            ('alias = items', '((alias := []) for _ in [0])', 'alias.clear()', {'items'}),
+            ('alias = []', '(items.clear() for _ in [0])', 'pass', set()),
+            ('alias = []', '(0 for _ in items.pop())', 'pass', {'items'}),
+            ('alias = []', '(0 for _ in (alias := items))', 'alias.clear()', {'items'}),
+        ]
+        for setup, expression, ending, expected in cases:
+            source = f'def collect(items):\n    {setup}\n    pending = {expression}\n    {ending}\n'
+            with self.subTest(expression=expression):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
     def test_comprehension_walrus_updates_enclosing_aliases(self):
         cases = [
             ('alias = []', '[(alias := items) for index in range(1)]', 'alias.clear()', {'items'}),

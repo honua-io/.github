@@ -274,6 +274,8 @@ class Mutations(ast.NodeVisitor):
 
     def comprehension(self, node):
         self.visit(node.generators[0].iter)
+        if isinstance(node, ast.GeneratorExp):
+            return
         saved = merge_bindings([self.bindings])
         values = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
         body = [ast.Expr(value=value) for value in values]

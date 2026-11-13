@@ -25,6 +25,13 @@ const HANDLERS = new Map([
   [ts.SyntaxKind.BinaryExpression, "assignment"],
 ]);
 
+function unwrap(node) {
+  while (node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+      || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)
+      || ts.isSatisfiesExpression(node))) node = node.expression;
+  return node;
+}
+
 function copyBindings(bindings) {
   return new Map([...bindings].map(([key, values]) => [key, new Set(values)]));
 }
@@ -55,10 +62,8 @@ class Mutations {
   }
 
   aliases(node) {
+    node = unwrap(node);
     if (!node) return new Set();
-    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
-        || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)
-        || ts.isSatisfiesExpression(node)) return this.aliases(node.expression);
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       return this.aliases(node.right);
     }
@@ -67,12 +72,14 @@ class Mutations {
   }
 
   bind(target, value) {
+    target = unwrap(target);
     if (ts.isIdentifier(target)) {
       this.bindings.set(this.checker.getSymbolAtLocation(target), this.aliases(value));
     }
   }
 
   mutationAliases(target) {
+    target = unwrap(target);
     return ts.isElementAccessExpression(target) || ts.isPropertyAccessExpression(target)
       ? this.aliases(target.expression) : new Set();
   }
@@ -136,7 +143,8 @@ class Mutations {
     this.bindings = mergeBindings(continuing);
     if (!continuing.length) return broken;
     if (node.incrementor) this.visit(node.incrementor);
-    if (node.condition) this.visit(node.condition);
+    const condition = ts.isWhileStatement(node) || ts.isDoStatement(node) ? node.expression : node.condition;
+    if (condition) this.visit(condition);
     return broken;
   }
 
@@ -211,7 +219,7 @@ class Mutations {
   }
 
   evaluatedReceiver(target) {
-    if (ts.isParenthesizedExpression(target)) return this.evaluatedReceiver(target.expression);
+    target = unwrap(target);
     if (!ts.isElementAccessExpression(target) && !ts.isPropertyAccessExpression(target)) {
       this.visit(target);
       return new Set();

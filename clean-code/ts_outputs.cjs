@@ -38,6 +38,7 @@ class Mutations {
   constructor(functionNode, checker) {
     this.checker = checker;
     this.outputs = new Set();
+    this.exits = [];
     this.bindings = new Map(functionNode.parameters.filter((parameter) => ts.isIdentifier(parameter.name)).map((parameter) => [
       checker.getSymbolAtLocation(parameter.name), new Set([parameter.name.getText()]),
     ]));
@@ -96,15 +97,24 @@ class Mutations {
     this.bindings = mergeBindings(fallsThrough ? [initial, this.bindings] : [initial]);
   }
 
+  capturedBlock(block) {
+    this.exits.push([]);
+    const normal = this.visit(block) !== false;
+    const exits = this.exits.pop();
+    if (this.exits.length) this.exits.at(-1).push(...exits);
+    return { normal, exits };
+  }
+
   exceptionPaths(node) {
-    const initial = copyBindings(this.bindings);
-    const normal = this.visit(node.tryBlock) !== false;
-    const paths = [{ bindings: this.bindings, normal }];
+    const { normal, exits } = this.capturedBlock(node.tryBlock);
+    const exceptional = mergeBindings(exits.filter((exit) => exit.throws).map((exit) => exit.bindings));
+    const paths = [{ bindings: this.bindings, normal }, { bindings: mergeBindings(exits.map((exit) => exit.bindings)), normal: false }];
     if (node.catchClause) {
-      this.bindings = mergeBindings([initial, this.bindings]);
+      this.bindings = copyBindings(exceptional);
       if (node.catchClause.variableDeclaration) this.bind(node.catchClause.variableDeclaration.name, undefined);
-      const normal = this.visit(node.catchClause.block) !== false;
-      paths.push({ bindings: this.bindings, normal });
+      const caught = this.capturedBlock(node.catchClause.block);
+      paths.push({ bindings: this.bindings, normal: caught.normal });
+      paths.push({ bindings: mergeBindings(caught.exits.map((exit) => exit.bindings)), normal: false });
     }
     return paths;
   }
@@ -121,6 +131,12 @@ class Mutations {
   }
 
   assignment(node) {
+    if ([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken,
+      ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
+      this.visit(node.left);
+      this.branches([undefined, node.right]);
+      return;
+    }
     if (node.operatorToken.kind < ts.SyntaxKind.FirstAssignment
         || node.operatorToken.kind > ts.SyntaxKind.LastAssignment) {
       ts.forEachChild(node, (child) => { this.visit(child); });
@@ -154,6 +170,11 @@ class Mutations {
 
   visit(node) {
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    if (this.exits.length && (ts.isCallExpression(node) || ts.isNewExpression(node)
+        || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+        || ts.isReturnStatement(node) || ts.isThrowStatement(node))) {
+      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: !ts.isReturnStatement(node) });
+    }
     const handler = HANDLERS.get(node.kind);
     if (handler) return this[handler](node);
     this.mutation(node);

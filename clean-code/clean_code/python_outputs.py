@@ -30,6 +30,7 @@ class Mutations(ast.NodeVisitor):
     def __init__(self, bindings):
         self.bindings = bindings
         self.outputs = set()
+        self.exits = []
 
     def statements(self, statements):
         for statement in statements:
@@ -43,6 +44,9 @@ class Mutations(ast.NodeVisitor):
         if isinstance(node, COMPREHENSIONS):
             self.comprehension(node)
             return
+        if self.exits and isinstance(node, (ast.Call, ast.Attribute, ast.Subscript,
+                                           ast.BinOp, ast.Compare, ast.Await, ast.Return, ast.Raise)):
+            self.exits[-1].append((merge_bindings([self.bindings]), not isinstance(node, ast.Return)))
         return super().visit(node)
 
     def aliases(self, node):
@@ -95,17 +99,36 @@ class Mutations(ast.NodeVisitor):
                 self.bindings.setdefault(name, set()).update(values)
         return bool(endings)
 
+    def visit_BoolOp(self, node):
+        self.visit(node.values[0])
+        for value in node.values[1:]:
+            self.branches([[], [value]])
+
+    def visit_IfExp(self, node):
+        self.visit(node.test)
+        self.branches([[node.body], [node.orelse]])
+
+    def captured_statements(self, body):
+        self.exits.append([])
+        normal = self.statements(body)
+        exits = self.exits.pop()
+        if self.exits:
+            self.exits[-1].extend(exits)
+        return normal, exits
+
     def exception_paths(self, node):
-        initial = {name: values.copy() for name, values in self.bindings.items()}
-        normal = self.statements(node.body) and self.statements(node.orelse)
-        paths = [(self.bindings, normal)]
-        exceptional = merge_bindings([initial, self.bindings])
+        normal, exits = self.captured_statements(node.body)
+        exceptional = merge_bindings([bindings for bindings, throws in exits if throws])
+        if normal:
+            normal, other_exits = self.captured_statements(node.orelse)
+            exits.extend(other_exits)
+        paths = [(self.bindings, normal), (merge_bindings([bindings for bindings, _ in exits]), False)]
         for handler in node.handlers:
-            self.bindings = {name: values.copy() for name, values in exceptional.items()}
+            self.bindings = merge_bindings([exceptional])
             if handler.name:
                 self.bindings[handler.name] = set()
-            normal = self.statements(handler.body)
-            paths.append((self.bindings, normal))
+            normal, handler_exits = self.captured_statements(handler.body)
+            paths.extend([(self.bindings, normal), (merge_bindings([bindings for bindings, _ in handler_exits]), False)])
         return paths
 
     def visit_Try(self, node):

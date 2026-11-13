@@ -46,6 +46,39 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(self.outputs(path, source), set())
 
+    def test_short_circuit_paths_preserve_input_aliases(self):
+        for operator in ('and', 'or'):
+            source = f'def collect(items, flag):\n    flag {operator} (items := [])\n    items.clear()\n'
+            with self.subTest(operator=operator):
+                self.assertEqual(self.outputs('a.py', source), {'items'})
+        for operator in ('&&', '||', '??'):
+            source = f'function collect(items, flag) {{ flag {operator} (items = []); items.push(1); }}'
+            with self.subTest(operator=operator):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+
+    def test_conditional_expression_preserves_skipped_binding(self):
+        source = 'def collect(items, flag):\n    (items := []) if flag else None\n    items.clear()\n'
+        self.assertEqual(self.outputs('a.py', source), {'items'})
+
+    def test_finally_sees_exceptions_before_and_between_rebindings(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    try:\n        may_fail()\n        items = []\n    finally:\n        items.clear()\n'),
+            ('a.ts', 'function collect(items) { try { mayFail(); items = []; } finally { items.push(1); } }'),
+            ('a.py', 'def collect(items):\n    alias = []\n    try:\n        alias = items\n        may_fail()\n        alias = []\n        items = []\n    finally:\n        alias.clear()\n'),
+            ('a.ts', 'function collect(items) { let alias = []; try { alias = items; mayFail(); alias = []; items = []; } finally { alias.push(1); } }'),
+        ]
+        for path, source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(self.outputs(path, source), {'items'})
+
+    def test_safe_rebinding_before_finally_does_not_mutate_input(self):
+        for path, source in [
+            ('a.py', 'def collect(items):\n    try:\n        items = []\n    finally:\n        items.clear()\n'),
+            ('a.ts', 'function collect(items) { try { items = []; } finally { items.push(1); } }'),
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(self.outputs(path, source), set())
+
     def test_zero_iteration_loop_preserves_input_alias(self):
         for loop in ['while(n-- > 0)', 'for(;n-- > 0;)', 'for(const value of values)']:
             source = f'function collect(items: number[], n: number) {{ {loop} {{ items = []; }} items.push(1); }}'

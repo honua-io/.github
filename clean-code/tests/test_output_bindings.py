@@ -89,13 +89,23 @@ class OutputBindings(unittest.TestCase):
             ('a.ts', 'function collect(items, flag) { switch(flag) { case 0: items = []; break; } items.push(1); }', {'items'}),
             ('a.py', 'def collect(items, flag):\n    alias = items\n    match flag:\n        case 0: pass\n        case _: alias = []\n    alias.clear()\n', {'items'}),
             ('a.py', 'def collect(items, flag):\n    match flag:\n        case 0: items = []\n        case _: return\n    items.clear()\n', set()),
-            ('a.py', 'def collect(items, flag):\n    match flag:\n        case items: items.clear()\n', set()),
+            ('a.py', 'def collect(items, flag):\n    match flag:\n        case items: items.clear()\n', {'flag'}),
             ('a.py', 'def collect(items):\n    match items:\n        case alias: alias.clear()\n', {'items'}),
             ('a.py', 'def collect(items, flag):\n    match flag:\n        case 0: items = []\n    items.clear()\n', {'items'}),
         ]
         for path, source, expected in cases:
             with self.subTest(path=path, source=source):
                 self.assertEqual(self.outputs(path, source), expected)
+
+    def test_match_capture_mutates_subject_instead_of_shadowed_input(self):
+        source = 'def collect(items, flag):\n    match flag:\n        case items: items.clear()\n'
+        namespace = {}
+        exec(source, namespace)
+        original, subject = [1], [2]
+        namespace['collect'](original, subject)
+        self.assertEqual(original, [1])
+        self.assertEqual(subject, [])
+        self.assertEqual(self.outputs('a.py', source), {'flag'})
 
     def test_loop_break_and_continue_preserve_exit_bindings(self):
         for control in ('break', 'continue'):

@@ -113,13 +113,14 @@ class Mutations {
     let initial;
     do {
       initial = copyBindings(this.bindings);
-      this.loopIteration(node, broken);
+      broken.push(...this.loopIteration(node));
       this.bindings = mergeBindings([initial, this.bindings]);
     } while (!sameBindings(initial, this.bindings));
     this.bindings = mergeBindings([this.bindings, ...broken]);
   }
 
-  loopIteration(node, broken) {
+  loopIteration(node) {
+    const broken = [];
     if (this.collectionLoop(node)) this.bind(this.loopTarget(node), undefined);
     const { normal, exits } = this.capturedBlock(node.statement);
     const continuing = normal ? [this.bindings] : [];
@@ -129,9 +130,10 @@ class Mutations {
       else if (this.exits.length) this.exits.at(-1).push(exit);
     }
     this.bindings = mergeBindings(continuing);
-    if (!continuing.length) return;
+    if (!continuing.length) return broken;
     if (node.incrementor) this.visit(node.incrementor);
     if (node.condition) this.visit(node.condition);
+    return broken;
   }
 
   capturedBlock(block) {

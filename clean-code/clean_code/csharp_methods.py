@@ -31,10 +31,11 @@ def _method_at(tokens: list[Token], open_paren: int) -> Function | None:
     if name_index is None:
         return None
     close_paren = _matching(tokens, open_paren)
-    body_end = _body_end(tokens, close_paren + 1) if close_paren else None
+    primary = tokens[name_index - 1].text in {"class", "struct", "record"}
+    body_end = close_paren if primary else (_body_end(tokens, close_paren + 1) if close_paren else None)
     if body_end is None:
         return None
-    is_constructor = tokens[name_index - 1].text in MODIFIERS
+    is_constructor = _constructor_name(tokens, name_index)
     parameters = tuple(_parameter(segment) for segment in _split_parameters(tokens[open_paren + 1:close_paren]))
     name = tokens[name_index]
     return Function(name.text, name.line, tokens[body_end].line, parameters, is_constructor)
@@ -48,7 +49,30 @@ def _name_index(tokens: list[Token], open_paren: int) -> int | None:
         return None
     previous = tokens[index - 1].text
     declares_type = _is_identifier(previous) or previous in {">", "]", "?", "*"}
+    if _constructor_name(tokens, index):
+        return index
     return index if declares_type and previous not in NOT_A_DECLARATION else None
+
+
+def _constructor_name(tokens: list[Token], index: int) -> bool:
+    """Match the nearest enclosing type, including constructors with implicit private access."""
+    if tokens[index - 1].text in {"class", "struct", "record"}:
+        return True
+    scopes = []
+    pending = None
+    for position in range(index):
+        text = tokens[position].text
+        if text in {"class", "struct", "record"} and position + 1 < index:
+            following = tokens[position + 1].text
+            pending = tokens[position + 2].text if following in {"class", "struct"} else following
+        elif text == "{":
+            scopes.append(pending)
+            pending = None
+        elif text == "}" and scopes:
+            scopes.pop()
+        elif text == ";":
+            pending = None
+    return bool(scopes and scopes[-1] == tokens[index].text)
 
 
 def _body_end(tokens: list[Token], index: int) -> int | None:

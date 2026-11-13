@@ -84,25 +84,9 @@ def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[Param
 
 
 def _output_names(function: ast.AST) -> set[str]:
-    """Direct collection mutations in this scope; nested declarations have their own parameters."""
-    outputs: set[str] = set()
+    from .python_outputs import output_names
 
-    def visit(node: ast.AST) -> None:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            return
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr in {"append", "extend", "insert", "add", "update", "setdefault"}:
-                if isinstance(node.func.value, ast.Name):
-                    outputs.add(node.func.value.id)
-        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            if isinstance(node.value, ast.Name):
-                outputs.add(node.value.id)
-        for child in ast.iter_child_nodes(node):
-            visit(child)
-
-    for statement in function.body:
-        visit(statement)
-    return outputs
+    return output_names(function)
 
 
 def _is_boolean(argument: ast.arg, default: ast.expr | None) -> bool:

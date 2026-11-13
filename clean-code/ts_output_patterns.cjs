@@ -43,28 +43,27 @@ class Patterns {
   }
 
   evaluateArray(node) {
-    const value = { aliases: new Set(), state: "present", elements: [] };
+    let value = { aliases: new Set(), state: "present", elements: [] };
     for (const entry of node.elements) {
       const spread = ts.isSpreadElement(entry);
       const item = ts.isOmittedExpression(entry) ? this.snapshot() : this.evaluate(spread ? entry.expression : entry);
-      this.appendArray(value, item, spread);
+      value = this.appendArray(value, item, spread);
     }
     return value;
   }
 
   appendArray(value, item, spread) {
-    if (value.unknownElements) return;
-    if (spread && item.elements) value.elements.push(...item.elements);
-    else if (spread) value.unknownElements = true;
-    else value.elements.push(item);
-    if (spread && item.unknownElements) value.unknownElements = true;
+    if (value.unknownElements) return value;
+    if (!spread) return { ...value, elements: value.elements.concat([item]) };
+    return { ...value, elements: value.elements.concat(item.elements ?? []),
+      unknownElements: !item.elements || item.unknownElements };
   }
 
   evaluateObject(node) {
-    const value = { aliases: new Set(), state: "present", properties: new Map() };
+    let value = { aliases: new Set(), state: "present", properties: new Map() };
     for (const entry of node.properties) {
       if (ts.isSpreadAssignment(entry)) {
-        this.spreadObject(value, this.evaluate(entry.expression));
+        value = this.spreadObject(value, this.evaluate(entry.expression));
         continue;
       }
       if (ts.isComputedPropertyName(entry.name)) this.mutations.visit(entry.name.expression);
@@ -76,11 +75,10 @@ class Patterns {
   }
 
   spreadObject(value, spread) {
-    if (!spread.properties || spread.unknownProperties) {
-      value.properties.clear();
-      value.unknownProperties = true;
-    }
-    for (const [key, item] of spread.properties ?? []) value.properties.set(key, item);
+    const unknown = !spread.properties || spread.unknownProperties;
+    const properties = new Map(unknown ? [] : value.properties);
+    for (const [key, item] of spread.properties ?? []) properties.set(key, item);
+    return { ...value, properties, unknownProperties: unknown || value.unknownProperties };
   }
 
   snapshot(node) {

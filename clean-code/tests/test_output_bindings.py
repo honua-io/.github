@@ -73,6 +73,30 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(operator=operator):
                 self.assertEqual(self.outputs('a.ts', source), {'items'})
 
+    def test_index_side_effects_follow_receiver_capture(self):
+        for operator in ('=', '+=', '&&=', '||=', '??='):
+            source = f'function collect(items) {{ items[(items = [], 0)] {operator} 1; }}'
+            with self.subTest(operator=operator):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+        source = 'function collect(items) { (items = [])[(items = [], 0)] = 1; }'
+        self.assertEqual(self.outputs('a.ts', source), set())
+
+    def test_switch_and_match_merge_alternative_paths(self):
+        cases = [
+            ('a.ts', 'function collect(items, flag) { let alias = items; switch(flag) { case 0: break; default: alias = []; } alias.push(1); }', {'items'}),
+            ('a.ts', 'function collect(items, flag) { let alias = items; switch(flag) { case 0: alias = []; default: alias = []; } alias.push(1); }', set()),
+            ('a.ts', 'function collect(items, flag) { switch(flag) { case 0: items = []; break; default: return; } items.push(1); }', set()),
+            ('a.ts', 'function collect(items, flag) { switch(flag) { case 0: items = []; break; } items.push(1); }', {'items'}),
+            ('a.py', 'def collect(items, flag):\n    alias = items\n    match flag:\n        case 0: pass\n        case _: alias = []\n    alias.clear()\n', {'items'}),
+            ('a.py', 'def collect(items, flag):\n    match flag:\n        case 0: items = []\n        case _: return\n    items.clear()\n', set()),
+            ('a.py', 'def collect(items, flag):\n    match flag:\n        case items: items.clear()\n', set()),
+            ('a.py', 'def collect(items):\n    match items:\n        case alias: alias.clear()\n', {'items'}),
+            ('a.py', 'def collect(items, flag):\n    match flag:\n        case 0: items = []\n    items.clear()\n', {'items'}),
+        ]
+        for path, source, expected in cases:
+            with self.subTest(path=path, source=source):
+                self.assertEqual(self.outputs(path, source), expected)
+
     def test_loop_break_and_continue_preserve_exit_bindings(self):
         for control in ('break', 'continue'):
             cases = [

@@ -9,6 +9,7 @@ const HANDLERS = new Map([
   [ts.SyntaxKind.Block, "block"],
   [ts.SyntaxKind.CallExpression, "call"],
   [ts.SyntaxKind.TryStatement, "tryStatement"],
+  [ts.SyntaxKind.SwitchStatement, "switchStatement"],
   [ts.SyntaxKind.ReturnStatement, "terminate"],
   [ts.SyntaxKind.ThrowStatement, "terminate"],
   [ts.SyntaxKind.BreakStatement, "terminate"],
@@ -191,8 +192,7 @@ class Mutations {
       ts.forEachChild(node, (child) => { this.visit(child); });
       return;
     }
-    this.visit(node.left);
-    const receiver = this.mutationAliases(node.left);
+    const receiver = this.evaluatedReceiver(node.left);
     if ([ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
       ts.SyntaxKind.QuestionQuestionEqualsToken].includes(node.operatorToken.kind)) {
       const skipped = copyBindings(this.bindings);
@@ -205,6 +205,49 @@ class Mutations {
     this.visit(node.right);
     this.record(receiver);
     if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) this.bind(node.left, node.right);
+  }
+
+  evaluatedReceiver(target) {
+    if (ts.isParenthesizedExpression(target)) return this.evaluatedReceiver(target.expression);
+    if (!ts.isElementAccessExpression(target) && !ts.isPropertyAccessExpression(target)) {
+      this.visit(target);
+      return new Set();
+    }
+    this.visit(target.expression);
+    const receiver = this.aliases(target.expression);
+    if (target.argumentExpression) this.visit(target.argumentExpression);
+    if (this.exits.length) this.exits.at(-1).push({ bindings: copyBindings(this.bindings), kind: "throw" });
+    return receiver;
+  }
+
+  switchStatement(node) {
+    this.visit(node.expression);
+    const clauses = node.caseBlock.clauses;
+    const starts = [];
+    for (const clause of clauses) {
+      if (clause.expression) this.visit(clause.expression);
+      starts.push(copyBindings(this.bindings));
+    }
+    const unmatched = copyBindings(this.bindings);
+    const endings = clauses.some(ts.isDefaultClause) ? [] : [unmatched];
+    for (let index = 0; index < clauses.length; index++) {
+      this.bindings = copyBindings(ts.isDefaultClause(clauses[index]) ? unmatched : starts[index]);
+      endings.push(...this.switchPath(clauses.slice(index)));
+    }
+    this.bindings = mergeBindings(endings);
+    return endings.length > 0;
+  }
+
+  switchPath(clauses) {
+    this.exits.push([]);
+    const normal = this.statements(clauses.flatMap((clause) => [...clause.statements]));
+    const exits = this.exits.pop();
+    const endings = normal ? [this.bindings] : [];
+    for (const exit of exits) {
+      if (exit.kind === "break") endings.push(exit.bindings);
+      else if (this.exits.length) this.exits.at(-1).push(exit);
+    }
+    return endings;
   }
 
   block(node) {

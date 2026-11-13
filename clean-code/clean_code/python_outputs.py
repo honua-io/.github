@@ -159,6 +159,51 @@ class Mutations(ast.NodeVisitor):
         self.visit(node.test)
         return self.branches([node.body, node.orelse])
 
+    def visit_Match(self, node):
+        self.visit(node.subject)
+        remaining = merge_bindings([self.bindings])
+        endings = []
+        for case in node.cases:
+            self.bindings = merge_bindings([remaining])
+            self.match_captures(case.pattern)
+            self.match_aliases(case.pattern, self.aliases(node.subject))
+            if case.guard:
+                self.visit(case.guard)
+                remaining = merge_bindings([remaining, self.bindings])
+            elif self.irrefutable(case.pattern):
+                remaining = None
+            if self.statements(case.body):
+                endings.append(self.bindings)
+            if remaining is None:
+                break
+        if remaining is not None:
+            endings.append(remaining)
+        self.bindings = merge_bindings(endings)
+        return bool(endings)
+
+    def match_captures(self, pattern):
+        for part in ast.walk(pattern):
+            name = getattr(part, 'name', None)
+            if name:
+                self.bindings[name] = set()
+            if isinstance(part, ast.MatchMapping) and part.rest:
+                self.bindings[part.rest] = set()
+
+    def match_aliases(self, pattern, aliases):
+        if isinstance(pattern, ast.MatchAs):
+            if pattern.name:
+                self.bindings[pattern.name] = aliases.copy()
+            if pattern.pattern:
+                self.match_aliases(pattern.pattern, aliases)
+        elif isinstance(pattern, ast.MatchOr):
+            for part in pattern.patterns:
+                self.match_aliases(part, aliases)
+
+    def irrefutable(self, pattern):
+        if isinstance(pattern, ast.MatchAs):
+            return pattern.pattern is None or self.irrefutable(pattern.pattern)
+        return isinstance(pattern, ast.MatchOr) and any(self.irrefutable(part) for part in pattern.patterns)
+
     def visit_Return(self, node):
         self.generic_visit(node)
         if self.exits:

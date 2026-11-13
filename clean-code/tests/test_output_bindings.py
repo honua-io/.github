@@ -67,6 +67,29 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(path=path, source=source):
                 self.assertEqual(self.outputs(path, source), expected)
 
+    def test_python_index_base_is_evaluated_before_receiver_capture(self):
+        cases = [
+            ('(items := [0])[0] = 1', set()),
+            ('(alias := items)[0] = 1', {'items'}),
+            ('items[(items := [0], 0)[1]] = 1', {'items'}),
+            ('del (items := [0])[0]', set()),
+            ('del (alias := items)[0]', {'items'}),
+        ]
+        for statement, expected in cases:
+            source = f'def collect(items):\n    alias = [0]\n    {statement}\n'
+            with self.subTest(statement=statement):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
+    def test_match_subject_alias_survives_capture_and_guard_rebinding(self):
+        cases = [
+            ('case items: items.clear()', {'items'}),
+            ('case items if (items := []): pass\n        case alias: alias.clear()', {'items'}),
+        ]
+        for pattern, expected in cases:
+            source = f'def collect(items):\n    match items:\n        {pattern}\n'
+            with self.subTest(pattern=pattern):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
     def test_indexed_assignment_preserves_evaluated_receiver(self):
         for operator in ('=', '+=', '&&=', '||=', '??='):
             source = f'function collect(items) {{ items[0] {operator} (items = []); }}'

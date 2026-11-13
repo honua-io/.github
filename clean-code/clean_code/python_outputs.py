@@ -87,9 +87,11 @@ class Mutations(ast.NodeVisitor):
         self.outputs.update(receiver)
 
     def visit_Subscript(self, node):
+        self.visit(node.value)
+        receiver = self.aliases(node.value)
+        self.visit(node.slice)
         if isinstance(node.ctx, (ast.Store, ast.Del)):
-            self.outputs.update(self.aliases(node.value))
-        self.generic_visit(node)
+            self.outputs.update(receiver)
 
     def branches(self, paths):
         initial = {name: values.copy() for name, values in self.bindings.items()}
@@ -161,12 +163,13 @@ class Mutations(ast.NodeVisitor):
 
     def visit_Match(self, node):
         self.visit(node.subject)
+        subject_aliases = self.aliases(node.subject)
         remaining = merge_bindings([self.bindings])
         endings = []
         for case in node.cases:
             self.bindings = merge_bindings([remaining])
             self.match_captures(case.pattern)
-            self.match_aliases(case.pattern, self.aliases(node.subject))
+            self.match_aliases(case.pattern, subject_aliases)
             if case.guard:
                 self.visit(case.guard)
                 remaining = merge_bindings([remaining, self.bindings])

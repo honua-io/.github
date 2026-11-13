@@ -119,3 +119,23 @@ class OutputTargets(OutputAssertions):
         ]:
             with self.subTest(body=body):
                 self.assertEqual(self.outputs('a.ts', f'function collect(items, other) {{ {body} }}'), expected)
+
+    def test_rest_parameters_are_fresh_collections(self):
+        for body, expected in [
+            ('function collect(...items) { items.sort(); return items; }', set()),
+            ('function collect(items, ...rest) { rest.push(1); items.sort(); }', {'items'}),
+            ('function collect(items, ...rest) { const alias = rest; alias.clear(); }', set()),
+            ('function collect(items, ...rest) { rest = items; rest.push(1); }', {'items'}),
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', body), expected)
+
+    def test_signed_literal_keys_preserve_aliases(self):
+        for target, source, expected in [
+            ('[-1]', '[-1]', {'items'}), ('[-1]', '"-1"', {'items'}),
+            ('"-1"', '[-1]', {'items'}), ('[+1]', '1', {'items'}),
+            ('[-0]', '"0"', {'items'}), ('[-1]', '[1]', set()),
+        ]:
+            with self.subTest(target=target, source=source):
+                body = f'const {{{target}: alias}} = {{{source}: items}}; alias.push(1);'
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), expected)

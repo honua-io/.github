@@ -33,7 +33,7 @@ class Mutations {
     this.checker = checker;
     this.outputs = new Set();
     this.exits = [];
-    this.bindings = new Map(functionNode.parameters.filter((parameter) => ts.isIdentifier(parameter.name)).map((parameter) => [
+    this.bindings = new Map(functionNode.parameters.filter((parameter) => ts.isIdentifier(parameter.name) && !parameter.dotDotDotToken).map((parameter) => [
       checker.getSymbolAtLocation(parameter.name), new Set([parameter.name.getText()]),
     ]));
   }

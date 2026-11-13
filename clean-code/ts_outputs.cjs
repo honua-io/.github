@@ -101,20 +101,21 @@ class Mutations {
     this.exits.push([]);
     const normal = this.visit(block) !== false;
     const exits = this.exits.pop();
-    if (this.exits.length) this.exits.at(-1).push(...exits);
     return { normal, exits };
   }
 
   exceptionPaths(node) {
     const { normal, exits } = this.capturedBlock(node.tryBlock);
     const exceptional = mergeBindings(exits.filter((exit) => exit.throws).map((exit) => exit.bindings));
-    const paths = [{ bindings: this.bindings, normal }, { bindings: mergeBindings(exits.map((exit) => exit.bindings)), normal: false }];
+    const paths = normal ? [{ bindings: this.bindings, normal: true }] : [];
+    paths.push(...exits.filter((exit) => !exit.throws || !node.catchClause)
+      .map((exit) => ({ ...exit, normal: false })));
     if (node.catchClause && exits.some((exit) => exit.throws)) {
       this.bindings = copyBindings(exceptional);
       if (node.catchClause.variableDeclaration) this.bind(node.catchClause.variableDeclaration.name, undefined);
       const caught = this.capturedBlock(node.catchClause.block);
-      paths.push({ bindings: this.bindings, normal: caught.normal });
-      paths.push({ bindings: mergeBindings(caught.exits.map((exit) => exit.bindings)), normal: false });
+      if (caught.normal) paths.push({ bindings: this.bindings, normal: true });
+      paths.push(...caught.exits.map((exit) => ({ ...exit, normal: false })));
     }
     return paths;
   }
@@ -123,8 +124,14 @@ class Mutations {
     const endings = [];
     for (const path of this.exceptionPaths(node)) {
       this.bindings = copyBindings(path.bindings);
-      const normal = !node.finallyBlock || this.visit(node.finallyBlock) !== false;
-      if (normal && path.normal) endings.push(this.bindings);
+      const final = node.finallyBlock ? this.capturedBlock(node.finallyBlock) : { normal: true, exits: [] };
+      if (this.exits.length) {
+        this.exits.at(-1).push(...final.exits);
+        if (final.normal && !path.normal) {
+          this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: path.throws });
+        }
+      }
+      if (final.normal && path.normal) endings.push(this.bindings);
     }
     this.bindings = mergeBindings(endings);
     return endings.length > 0;
@@ -154,6 +161,9 @@ class Mutations {
 
   terminate(node) {
     if (node.expression) this.visit(node.expression);
+    if (this.exits.length) {
+      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: ts.isThrowStatement(node) });
+    }
     return false;
   }
 
@@ -171,9 +181,8 @@ class Mutations {
   visit(node) {
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
     if (this.exits.length && (ts.isCallExpression(node) || ts.isNewExpression(node)
-        || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
-        || ts.isReturnStatement(node) || ts.isThrowStatement(node))) {
-      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: !ts.isReturnStatement(node) });
+        || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
+      this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: true });
     }
     const handler = HANDLERS.get(node.kind);
     if (handler) return this[handler](node);

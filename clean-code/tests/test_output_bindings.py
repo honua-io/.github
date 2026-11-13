@@ -80,6 +80,25 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.outputs(path, source), {'items'})
 
+    def test_nested_finally_transforms_exception_bindings(self):
+        for binding, expected in [('alias = items', {'items'}), ('alias = []', set())]:
+            cases = [
+                ('a.py', f'def collect(items):\n    alias = items\n    try:\n        try:\n            may_fail()\n        finally:\n            {binding}\n    except Exception:\n        alias.clear()\n'),
+                ('a.ts', f'function collect(items) {{ let alias = items; try {{ try {{ mayFail(); }} finally {{ {binding}; }} }} catch {{ alias.push(1); }} }}'),
+            ]
+            for path, source in cases:
+                with self.subTest(path=path, binding=binding):
+                    self.assertEqual(self.outputs(path, source), expected)
+
+    def test_return_expression_rebinding_precedes_finally(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    try:\n        return (items := [])\n    finally:\n        items.clear()\n'),
+            ('a.ts', 'function collect(items) { try { return (items = []); } finally { items.push(1); } }'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.outputs(path, source), set())
+
     def test_safe_rebinding_before_finally_does_not_mutate_input(self):
         for path, source in [
             ('a.py', 'def collect(items):\n    try:\n        items = []\n    finally:\n        items.clear()\n'),

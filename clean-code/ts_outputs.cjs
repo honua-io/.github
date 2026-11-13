@@ -139,17 +139,19 @@ class Mutations {
     }
     const { normal, exits } = this.capturedBlock(node.statement);
     const continuing = normal ? [this.bindings] : [];
-    for (const exit of exits) {
-      if (exit.kind === "break") broken.push(exit.bindings);
-      else if (exit.kind === "continue") continuing.push(exit.bindings);
-      else if (this.exits.length) this.exits.at(-1).push(exit);
-    }
+    for (const exit of exits) this.loopExit(exit, { broken, continuing });
     this.bindings = mergeBindings(continuing);
     if (!continuing.length) return broken;
     if (node.incrementor) this.visit(node.incrementor);
     const condition = ts.isWhileStatement(node) || ts.isDoStatement(node) ? node.expression : node.condition;
     if (condition) this.visit(condition);
     return broken;
+  }
+
+  loopExit(exit, paths) {
+    if (exit.kind === "break") paths.broken.push(exit.bindings);
+    else if (exit.kind === "continue") paths.continuing.push(exit.bindings);
+    else if (this.exits.length) this.exits.at(-1).push(exit);
   }
 
   capturedBlock(block) {

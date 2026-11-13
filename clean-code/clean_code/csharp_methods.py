@@ -115,7 +115,8 @@ def _parameter(segment: list[Token]) -> Parameter:
     texts = [token.text for token in _without_attributes(segment) if token.text not in PARAMETER_MODIFIERS]
     declaration = texts[: texts.index("=")] if "=" in texts else texts
     name = next((text for text in reversed(declaration) if _is_identifier(text)), "")
-    return Parameter(name, is_boolean=len(declaration) > 1 and declaration[0] in BOOLEAN_TYPES)
+    modifiers = {token.text for token in _without_attributes(segment)}
+    return Parameter(name, len(declaration) > 1 and declaration[0] in BOOLEAN_TYPES, "out" in modifiers or ("ref" in modifiers and "readonly" not in modifiers))
 
 
 def _without_attributes(segment: list[Token]) -> list[Token]:

@@ -35,5 +35,5 @@ def _to_lexed(result: dict) -> Lexed | LexError:
 
 def _function(description: list) -> Function:
     name, start, end, parameters, is_constructor = description
-    described = tuple(Parameter(parameter_name, is_boolean) for parameter_name, is_boolean in parameters)
+    described = tuple(Parameter(*parameter) for parameter in parameters)
     return Function(name, start, end, described, is_constructor)

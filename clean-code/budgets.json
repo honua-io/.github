@@ -1,7 +1,7 @@
 {
-  "functionLines": 60,
+  "functionLines": 40,
   "functionGrowthLines": 10,
-  "parameters": 4,
+  "parameters": 3,
   "newFileLines": 400,
   "largeFileLines": 800,
   "largeFileGrowthLines": 50,

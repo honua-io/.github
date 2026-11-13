@@ -6,7 +6,6 @@ const SCRIPT_KINDS = {
   ".ts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX,
   ".js": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX,
 };
-const TEST_BLOCKS = new Set(["describe", "context", "suite", "it", "test", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
 const LINE_BREAK = /[\r\n\u2028\u2029]/;
 
 function scriptKind(path) {
@@ -62,14 +61,6 @@ function collectComments(source) {
   return comments.sort((a, b) => a[0] - b[0]);
 }
 
-function isTestBlockCallback(node) {
-  const call = node.parent;
-  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(node)) return false;
-  let callee = call.expression;
-  while (ts.isCallExpression(callee) || ts.isPropertyAccessExpression(callee)) callee = callee.expression;
-  return ts.isIdentifier(callee) && TEST_BLOCKS.has(callee.text);
-}
-
 function functionName(node, source) {
   if (node.name) return node.name.getText(source);
   if (node.parent && ts.isVariableDeclaration(node.parent)) return node.parent.name.getText(source);
@@ -84,15 +75,38 @@ function isBooleanParameter(parameter) {
 }
 
 function describeFunction(node, source) {
-  const parameters = node.parameters.map((parameter) => [parameter.name.getText(source), isBooleanParameter(parameter)]);
+  const outputs = outputNames(node.body);
+  const parameters = node.parameters.map((parameter) => [
+    parameter.name.getText(source), isBooleanParameter(parameter), outputs.has(parameter.name.getText(source)),
+  ]);
   const start = lineOf(source, node.getStart(source));
   return [functionName(node, source), start, lineOf(source, node.getEnd()), parameters, ts.isConstructorDeclaration(node)];
+}
+
+function outputNames(body) {
+  const names = new Set();
+  const mutators = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin", "add", "set", "delete", "clear"]);
+  const visit = (node) => {
+    if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const { expression, name } = node.expression;
+      if (ts.isIdentifier(expression) && mutators.has(name.text)) names.add(expression.text);
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      const target = node.left;
+      if (ts.isElementAccessExpression(target) && ts.isIdentifier(target.expression)) names.add(target.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return names;
 }
 
 function collectFunctions(source) {
   const functions = [];
   const visit = (node) => {
-    if (ts.isFunctionLike(node) && node.body && !isTestBlockCallback(node)) functions.push(describeFunction(node, source));
+    if (ts.isFunctionLike(node) && node.body) functions.push(describeFunction(node, source));
     ts.forEachChild(node, visit);
   };
   visit(source);

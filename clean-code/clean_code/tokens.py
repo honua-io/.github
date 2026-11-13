@@ -27,6 +27,7 @@ class Comment:
 class Parameter:
     name: str
     is_boolean: bool
+    is_output: bool = False
 
 
 @dataclass(frozen=True)

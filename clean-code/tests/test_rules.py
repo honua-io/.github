@@ -84,11 +84,12 @@ class LineScope(unittest.TestCase):
         found = pull_request.findings({"site/assets/main-3f2aB9xQ.js": source, "src/config.js": source})
         self.assertEqual({finding.location.path for finding in found}, {"src/config.js"})
 
-    def test_parameter_rules_skip_test_files(self):
+    def test_parameter_rules_apply_to_test_files(self):
         pull_request = PullRequest({"README.md": "x\n"})
         self.addCleanup(pull_request.close)
         theory = "class T\n{\n    void Case(int a, int b, int c, int d, bool expected) { }\n}\n"
-        self.assertEqual(rule_keys(pull_request.findings({"tests/Api.Tests/CaseTests.cs": theory})), set())
+        self.assertTrue({"clean-code/too-many-parameters", "clean-code/flag-argument"} <= rule_keys(
+            pull_request.findings({"tests/Api.Tests/CaseTests.cs": theory})))
 
 
 class XmlDocPolicies(unittest.TestCase):
@@ -161,10 +162,10 @@ class FunctionLength(unittest.TestCase):
         return {finding.location.path for finding in found if finding.rule.key == "clean-code/function-length"}
 
     def test_functions_over_budget_are_flagged_in_every_language(self):
-        self.assertEqual(self.flagged(long_functions(59)), {"src/long.py", "src/Long.cs", "src/long.ts"})
+        self.assertEqual(self.flagged(long_functions(39)), {"src/long.py", "src/Long.cs", "src/long.ts", "src/spec/long.test.ts"})
 
-    def test_functions_at_budget_and_test_blocks_pass(self):
-        self.assertEqual(self.flagged(long_functions(58)), set())
+    def test_functions_at_budget_pass(self):
+        self.assertEqual(self.flagged(long_functions(37)), set())
 
 
 if __name__ == "__main__":

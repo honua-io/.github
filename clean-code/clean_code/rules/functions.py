@@ -1,5 +1,5 @@
-"""G30, F1 and F3 as a ratchet: a touched function may not exceed a budget further than its base counterpart did,
-nor gain a boolean flag parameter."""
+"""G30, F1, F2 and F3 as a ratchet: a touched function may not exceed a budget further than its base counterpart did,
+nor gain a boolean flag or output parameter."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -9,7 +9,6 @@ from ..context import CheckContext
 from ..findings import Finding, Location
 from ..git import FileChange
 from ..lexing import CSHARP, PYTHON, TYPESCRIPT, language_of
-from ..paths import is_test_path
 from ..tokens import Function
 
 PARAMETER_COUNT_LANGUAGES = frozenset({CSHARP.name})
@@ -34,8 +33,11 @@ class _FunctionChange:
 
     def added_flags(self) -> list[str]:
         """Boolean parameters beyond the base count, preferring names the base did not have."""
-        base_flags = [parameter.name for parameter in self.base.parameters if parameter.is_boolean] if self.base else []
-        head_flags = [parameter.name for parameter in self.head.parameters if parameter.is_boolean]
+        return self.added_names("is_boolean")
+
+    def added_names(self, attribute: str) -> list[str]:
+        base_flags = [p.name for p in self.base.parameters if getattr(p, attribute)] if self.base else []
+        head_flags = [p.name for p in self.head.parameters if getattr(p, attribute)]
         new_names = [name for name in head_flags if name not in base_flags]
         return list(dict.fromkeys(new_names + head_flags))[: max(0, len(head_flags) - len(base_flags))]
 
@@ -55,6 +57,9 @@ def _file_findings(change: FileChange, functions: list[Function], pairs: dict[Fu
             touched = _FunctionChange(function, pairs.get(function), Location(change.path, added[0]))
             yield from _length_findings(touched)
             yield from _parameter_findings(touched, language)
+            for name in touched.added_names("is_output"):
+                message = f"{function.name}({name}): return the collected result instead of modifying an output argument"
+                yield Finding.of("clean-code/output-argument", touched.location, message)
 
 
 def _length_findings(touched: _FunctionChange) -> Iterator[Finding]:
@@ -69,12 +74,10 @@ def _length_findings(touched: _FunctionChange) -> Iterator[Finding]:
 
 
 def _parameter_findings(touched: _FunctionChange, language: str) -> Iterator[Finding]:
-    """Parameter rules skip tests, whose parameters are mostly data rows and injected fixtures."""
-    if is_test_path(touched.location.path):
-        return
+    """Tests and constructors follow the same parameter budgets as application functions."""
     head = touched.head
     count = len(head.parameters)
-    grew_too_many = count > BUDGETS.parameters and count > touched.base_parameter_count and not head.is_constructor
+    grew_too_many = count > BUDGETS.parameters and count > touched.base_parameter_count
     if language in PARAMETER_COUNT_LANGUAGES and grew_too_many:
         message = f"{head.name} takes {count}; introduce a parameter object"
         yield Finding.of("clean-code/too-many-parameters", touched.location, message)

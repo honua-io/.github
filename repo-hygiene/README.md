@@ -1,6 +1,8 @@
 # Repository hygiene
 
-The reusable workflow checks only files added by a pull request. Modifying or deleting existing files does not trigger this rule. A rename into a forbidden location counts as an addition. Candidate Git trees are fetched into a bare repository; candidate code and working-tree files are never executed or checked out.
+The reusable workflow checks added paths and protects files owned by trunk/release automation. The added-path rule permits modifying or deleting existing files. A rename into a forbidden location counts as an addition. Candidate Git trees are fetched into a bare repository; candidate code and working-tree files are never executed or checked out.
+
+Any PR addition, modification, deletion or rename of `llms*.txt`, `CHANGELOG.md`, `samples/dist/**`, `docs/bundle-sizes.md` or `api-report/**` is rejected. Terraform backend blocks in changed `.tf` files must keep the same tokenized content; comments, whitespace and changes outside backend blocks are allowed. Backend additions and deletions are rejected too. Gate-input exceptions cannot bypass these ownership checks. File contents are read from Git objects without executing candidate code.
 
 Each repository owns `.github/hygiene.json`, read with `git show` from the trusted base revision, never from the candidate. The shared repository contains no repository-specific data. Land the configuration before introducing the caller. Policy changes take effect on subsequent pull requests after they land.
 

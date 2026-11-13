@@ -12,7 +12,7 @@ def python_function(name: str, body_lines: int) -> str:
 
 class FunctionRatchet(unittest.TestCase):
     def setUp(self):
-        self.pull_request = PullRequest({"src/at_budget.py": python_function("at_budget", 58),
+        self.pull_request = PullRequest({"src/at_budget.py": python_function("at_budget", 38),
                                          "src/legacy.py": python_function("legacy", 98),
                                          "src/wide.py": "def wide(a, b, c, d, e):\n    return a\n"})
         self.addCleanup(self.pull_request.close)
@@ -21,7 +21,7 @@ class FunctionRatchet(unittest.TestCase):
         return rule_keys(self.pull_request.findings(files))
 
     def test_growing_a_function_past_the_budget_is_flagged(self):
-        self.assertIn("clean-code/function-length", self.keys({"src/at_budget.py": python_function("at_budget", 60)}))
+        self.assertIn("clean-code/function-length", self.keys({"src/at_budget.py": python_function("at_budget", 40)}))
 
     def test_touching_an_oversized_function_without_growing_it_is_not(self):
         edited = python_function("legacy", 98).replace("step_3()", "step_three()")
@@ -60,8 +60,8 @@ class Correspondence(unittest.TestCase):
 
     def test_an_overload_cannot_borrow_a_longer_overloads_baseline(self):
         long_overload = csharp_method("void Process(int count)", 78)
-        base = csharp_class(csharp_method("void Process(string text)", 57), long_overload)
-        head = csharp_class(csharp_method("void Process(string text)", 59), long_overload)
+        base = csharp_class(csharp_method("void Process(string text)", 37), long_overload)
+        head = csharp_class(csharp_method("void Process(string text)", 39), long_overload)
         self.assertIn("clean-code/function-length", self.findings({"src/Worker.cs": base}, {"src/Worker.cs": head}))
 
     def test_a_new_overload_does_not_inherit_flags_or_parameter_budget(self):

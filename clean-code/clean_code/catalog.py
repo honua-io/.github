@@ -58,6 +58,7 @@ RULES = {
         Rule("ruff/PLR0913", "F1", f"More than {B.parameters} parameters", PY),
         Rule("eslint/max-params", "F1", f"More than {B.parameters} parameters", TS),
         Rule("clean-code/flag-argument", "F3", "Boolean flag parameter", f"{CS}, {TS}, {PY}"),
+        Rule("clean-code/output-argument", "F2", "Output argument", f"{CS}, {TS}, {PY}"),
         Rule("ruff/FBT003", "F3", "Boolean positional argument in a call", PY, ADVISORY),
         Rule("clean-code/duplication", "G5", f"Duplicated block ({B.duplicate_lines}+ lines, {B.duplicate_tokens}+ tokens)", ALL),
         Rule("eslint/sonarjs/no-identical-functions", "G5", "Identical functions", TS),

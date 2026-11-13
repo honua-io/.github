@@ -122,6 +122,28 @@ class PathPolicyTests(unittest.TestCase):
                              "scratch belongs outside tracked product files")
 
 
+class BackendParsingTests(unittest.TestCase):
+    def test_comments_strings_and_heredocs_do_not_create_blocks(self):
+        text = ('# backend "s3" {}\n/* backend "s3" {} */\n'
+                'value = "backend \"s3\" {}"\n'
+                'script = <<-EOF\nbackend "s3" {}\nEOF\n')
+        self.assertEqual(RULES.backend_blocks(text), [])
+
+    def test_braces_in_strings_do_not_end_a_block(self):
+        text = 'terraform { backend "s3" { key = "}" options = { region = "eu" } } }'
+        self.assertEqual(len(RULES.backend_blocks(text)), 1)
+        self.assertIn('"}"', RULES.backend_blocks(text)[0])
+
+    def test_unquoted_backend_labels_are_protected(self):
+        blocks = RULES.backend_blocks('terraform { backend s3 { bucket = "state" } }')
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0][1], 's3')
+
+    def test_unterminated_backend_fails_closed(self):
+        with self.assertRaises(ValueError):
+            RULES.backend_blocks('terraform { backend "s3" {')
+
+
 class GitDiffTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -154,6 +176,45 @@ class GitDiffTests(unittest.TestCase):
         return subprocess.run(["python3", "-I", str(ROOT / "check.py"), "--repo", str(self.repo),
                                "--base", self.base, "--head", head],
                               capture_output=True, text=True)
+
+    def test_owned_file_changes_and_deletions_are_rejected(self):
+        paths = ["llms.txt", "docs/llms-full.txt", "CHANGELOG.md", "samples/dist/app.js",
+                 "docs/bundle-sizes.md", "api-report/client.api.md"]
+        for path in paths:
+            self.write(path, "original\n")
+        self.base = self.commit()
+        for path in paths:
+            self.write(path, "modified\n")
+        self.commit()
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.stdout.count("derived file is owned"), len(paths))
+        for path in paths:
+            (self.repo / path).unlink()
+        self.commit()
+        self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
+
+    def test_terraform_resource_changes_and_backend_formatting_are_allowed(self):
+        self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "state" } }\nresource "x" "y" {}\n')
+        self.base = self.commit()
+        self.write("docs/state.tf", 'terraform { backend "s3" { # state location\n bucket="state" } }\nresource "x" "z" {}\n')
+        self.commit()
+        self.assertEqual(self.check().returncode, 0, self.check().stdout)
+
+    def test_terraform_backend_changes_and_deletions_are_rejected(self):
+        self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "state" } }\n')
+        self.base = self.commit()
+        self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "other" } }\n')
+        self.commit()
+        self.assertIn("backend blocks may not change", self.check().stdout)
+        (self.repo / "docs/state.tf").unlink()
+        self.commit()
+        self.assertIn("backend blocks may not change", self.check().stdout)
+
+    def test_backend_additions_are_rejected_without_a_prior_file(self):
+        self.write("docs/new.tf", 'terraform { backend "s3" {} }\n')
+        self.commit()
+        self.assertIn("backend blocks may not change", self.check().stdout)
 
     def test_existing_history_modifications_and_deletions_are_allowed(self):
         self.write("docs/archive/old.md", "updated\n")

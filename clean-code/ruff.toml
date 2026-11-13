@@ -2,5 +2,5 @@
 select = ["C901", "ERA001", "FBT003", "PLR0913", "PLR0915", "PLR2004"]
 
 [lint.per-file-ignores]
-"**/{test_*,*_test,conftest}.py" = ["FBT003", "PLR0913", "PLR2004"]
-"**/tests/**" = ["FBT003", "PLR0913", "PLR2004"]
+"**/{test_*,*_test,conftest}.py" = ["PLR2004"]
+"**/tests/**" = ["PLR2004"]

@@ -1,12 +1,12 @@
 // Reads [{path, text}] JSON on stdin; writes {path: {tokens, comments, functions, error}} JSON on stdout.
 // Tokens come from the TypeScript parser's tree, so regex, template and JSX text lex exactly as the compiler sees them.
 const ts = require("typescript");
+const { outputNames } = require("./ts_outputs.cjs");
 
 const SCRIPT_KINDS = {
   ".ts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX,
   ".js": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX,
 };
-const TEST_BLOCKS = new Set(["describe", "context", "suite", "it", "test", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
 const LINE_BREAK = /[\r\n\u2028\u2029]/;
 
 function scriptKind(path) {
@@ -62,14 +62,6 @@ function collectComments(source) {
   return comments.sort((a, b) => a[0] - b[0]);
 }
 
-function isTestBlockCallback(node) {
-  const call = node.parent;
-  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(node)) return false;
-  let callee = call.expression;
-  while (ts.isCallExpression(callee) || ts.isPropertyAccessExpression(callee)) callee = callee.expression;
-  return ts.isIdentifier(callee) && TEST_BLOCKS.has(callee.text);
-}
-
 function functionName(node, source) {
   if (node.name) return node.name.getText(source);
   if (node.parent && ts.isVariableDeclaration(node.parent)) return node.parent.name.getText(source);
@@ -83,16 +75,19 @@ function isBooleanParameter(parameter) {
   return parameter.type?.kind === ts.SyntaxKind.BooleanKeyword || booleanLiteral;
 }
 
-function describeFunction(node, source) {
-  const parameters = node.parameters.map((parameter) => [parameter.name.getText(source), isBooleanParameter(parameter)]);
+function describeFunction(node, source, checker) {
+  const outputs = outputNames(node, checker);
+  const parameters = node.parameters.map((parameter) => [
+    parameter.name.getText(source), isBooleanParameter(parameter), outputs.has(parameter.name.getText(source)),
+  ]);
   const start = lineOf(source, node.getStart(source));
   return [functionName(node, source), start, lineOf(source, node.getEnd()), parameters, ts.isConstructorDeclaration(node)];
 }
 
-function collectFunctions(source) {
+function collectFunctions(source, checker) {
   const functions = [];
   const visit = (node) => {
-    if (ts.isFunctionLike(node) && node.body && !isTestBlockCallback(node)) functions.push(describeFunction(node, source));
+    if (ts.isFunctionLike(node) && node.body) functions.push(describeFunction(node, source, checker));
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -101,9 +96,17 @@ function collectFunctions(source) {
 
 function lex({ path, text }) {
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, scriptKind(path));
+  const host = {
+    getSourceFile: (name) => name === path ? source : undefined,
+    writeFile: () => {}, getCurrentDirectory: () => "", getDirectories: () => [],
+    fileExists: (name) => name === path, readFile: (name) => name === path ? text : undefined,
+    getCanonicalFileName: (name) => name, useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n", getDefaultLibFileName: () => "",
+  };
+  const checker = ts.createProgram([path], { noLib: true, noResolve: true, allowJs: true }, host).getTypeChecker();
   const diagnostics = source.parseDiagnostics ?? [];
   const error = diagnostics.length ? ts.flattenDiagnosticMessageText(diagnostics[0].messageText, " ") : null;
-  return { tokens: collectTokens(source), comments: collectComments(source), functions: collectFunctions(source), error };
+  return { tokens: collectTokens(source), comments: collectComments(source), functions: collectFunctions(source, checker), error };
 }
 
 let input = "";

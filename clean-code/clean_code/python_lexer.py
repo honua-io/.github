@@ -64,7 +64,7 @@ def _functions(tree: ast.Module) -> list[Function]:
         for child in ast.iter_child_nodes(node):
             name = f"{prefix}{getattr(child, 'name', '')}"
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append(Function(name, child.lineno, child.end_lineno, _parameters(child.args)))
+                functions.append(Function(name, child.lineno, child.end_lineno, _parameters(child)))
             is_scope = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             visit(child, f"{name}." if is_scope else prefix)
 
@@ -72,13 +72,21 @@ def _functions(tree: ast.Module) -> list[Function]:
     return functions
 
 
-def _parameters(arguments: ast.arguments) -> tuple[Parameter, ...]:
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[Parameter, ...]:
     """Named parameters other than self/cls; boolean when annotated `bool` or defaulting to True/False."""
+    arguments = function.args
     positional = arguments.posonlyargs + arguments.args
     defaults = [None] * (len(positional) - len(arguments.defaults)) + arguments.defaults
     pairs = list(zip(positional, defaults)) + list(zip(arguments.kwonlyargs, arguments.kw_defaults))
     named = [(argument, default) for argument, default in pairs if argument.arg not in {"self", "cls"}]
-    return tuple(Parameter(argument.arg, _is_boolean(argument, default)) for argument, default in named)
+    outputs = _output_names(function)
+    return tuple(Parameter(argument.arg, _is_boolean(argument, default), argument.arg in outputs) for argument, default in named)
+
+
+def _output_names(function: ast.AST) -> set[str]:
+    from .python_outputs import output_names
+
+    return output_names(function)
 
 
 def _is_boolean(argument: ast.arg, default: ast.expr | None) -> bool:

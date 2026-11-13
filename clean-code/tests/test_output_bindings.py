@@ -8,6 +8,19 @@ class OutputBindings(unittest.TestCase):
         functions = lex_files({path: source})[path].functions
         return {parameter.name for function in functions for parameter in function.parameters if parameter.is_output}
 
+    def test_irrefutable_match_guard_rebinding_applies_to_continuing_paths(self):
+        cases = [
+            ('_ if (items := [])', set()),
+            ('alias if (items := [0])', set()),
+            ('[] | _ if (items := [])', set()),
+            ('_ if flag and (items := [])', {'items'}),
+            ('[] if (items := [])', {'items'}),
+        ]
+        for pattern, expected in cases:
+            source = f'def collect(items, flag):\n    match items:\n        case {pattern}: pass\n    items.clear()\n'
+            with self.subTest(pattern=pattern):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
     def test_local_copies_and_shadowing_are_not_outputs(self):
         cases = [
             ('a.py', 'def collect(items):\n    items = list(items)\n    items.append(1)\n'),

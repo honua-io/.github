@@ -172,7 +172,8 @@ class Mutations(ast.NodeVisitor):
             self.match_aliases(case.pattern, subject_aliases)
             if case.guard:
                 self.visit(case.guard)
-                remaining = merge_bindings([remaining, self.bindings])
+                paths = [self.bindings] if self.irrefutable(case.pattern) else [remaining, self.bindings]
+                remaining = merge_bindings(paths)
             elif self.irrefutable(case.pattern):
                 remaining = None
             if self.statements(case.body):

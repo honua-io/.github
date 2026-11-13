@@ -58,11 +58,16 @@ def _constructor_name(tokens: list[Token], index: int) -> bool:
     """Match the nearest enclosing type, including constructors with implicit private access."""
     if tokens[index - 1].text in {"class", "struct", "record"}:
         return True
+    if tokens[index - 1].text not in MODIFIERS | {"[", "]", "{", "}", ";"}:
+        return False
     scopes = []
     pending = None
     for position in range(index):
         text = tokens[position].text
-        if text in {"class", "struct", "record"} and position + 1 < index:
+        if (text in {"class", "struct", "record"} and position + 1 < index
+                and _is_identifier(tokens[position + 1].text)
+                and (tokens[position + 1].text not in NOT_A_DECLARATION
+                     or (text == "record" and tokens[position + 1].text in {"class", "struct"}))):
             following = tokens[position + 1].text
             pending = tokens[position + 2].text if following in {"class", "struct"} else following
         elif text == "{":

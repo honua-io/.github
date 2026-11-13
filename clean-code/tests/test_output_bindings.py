@@ -34,6 +34,24 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(self.outputs(path, source), {'items'})
 
+    def test_terminated_paths_and_with_targets_are_not_output_aliases(self):
+        cases = [
+            ('a.py', 'def collect(items, flag):\n    if flag:\n        items = []\n    else:\n        return\n    items.clear()\n'),
+            ('a.py', 'def collect(items, flag):\n    if flag:\n        items = []\n    else:\n        raise ValueError()\n    items.clear()\n'),
+            ('a.py', 'def collect(items):\n    with factory() as items:\n        items.clear()\n'),
+            ('a.ts', 'function collect(items: number[], flag: boolean) { if(flag) items = []; else return; items.push(1); }'),
+            ('a.ts', 'function collect(items: number[], flag: boolean) { if(flag) items = []; else throw Error(); items.push(1); }'),
+        ]
+        for path, source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(self.outputs(path, source), set())
+
+    def test_zero_iteration_loop_preserves_input_alias(self):
+        for loop in ['while(n-- > 0)', 'for(;n-- > 0;)', 'for(const value of values)']:
+            source = f'function collect(items: number[], n: number) {{ {loop} {{ items = []; }} items.push(1); }}'
+            with self.subTest(loop=loop):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+
     def test_comprehension_does_not_hide_outer_input_after_its_scope(self):
         source = 'def collect(items):\n    values = [items for items in []]\n    items.clear()\n'
         self.assertEqual(self.outputs('a.py', source), {'items'})
@@ -42,6 +60,7 @@ class OutputBindings(unittest.TestCase):
 class ConstructorForms(unittest.TestCase):
     def test_implicit_and_primary_constructors_retain_parameter_metadata(self):
         for source in [
+            'class C<T> where T : class { C(int a,int b,int c,int d,bool enabled) {} }',
             'class C { C(int a,int b,int c,int d,bool enabled) {} }',
             'class C(int a,int b,int c,int d,bool enabled) {}',
             'record C(int a,int b,int c,int d,bool enabled);',
@@ -53,3 +72,8 @@ class ConstructorForms(unittest.TestCase):
                 self.assertTrue(functions[0].is_constructor)
                 self.assertEqual(len(functions[0].parameters), 5)
                 self.assertTrue(functions[0].parameters[-1].is_boolean)
+
+    def test_object_initializer_is_not_a_constructor_declaration(self):
+        source = 'class C { static C Create() { return new C(1,2,3,4) { Value = 1 }; } }'
+        functions = lex_files({'C.cs': source})['C.cs'].functions
+        self.assertFalse(any(function.is_constructor for function in functions))

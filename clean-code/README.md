@@ -80,7 +80,7 @@ Duplication: every run of 15 significant lines (blank, comment-only, punctuation
 
 Skipped as generated or vendored: `node_modules`, `dist`, `build`, `vendor`, `third_party`, `wwwroot/lib`, `Migrations`, `generated`, snapshots, `*.min.*`, `*.bundle.*`, hashed bundles under `assets/`, `*.d.ts`, `*.g.cs`, `*.Designer.cs`, protobuf output, symlinks and submodules; callers add globs with `exclude`.
 
-Output arguments (F2): C# `out`/`ref` parameters and direct mutations of Python/TS collection parameters are blocked when introduced. The collection heuristic covers known mutator calls and indexed assignments, skips nested scopes, and does not infer aliasing or arbitrary object methods. Return the collected result instead.
+Output arguments (F2): C# `out`/`ref` parameters and direct mutations of Python/TS collection parameters are blocked when introduced. The collection heuristic covers known mutator calls and indexed assignments, tracks direct aliases and local rebinding, skips nested scopes, and does not infer arbitrary object methods. Return the collected result instead.
 
 Comments (C1): bare `#123`, `SEC-12`, `honua-*#12`, honua-io issue or PR links, "PR 12"/"issue 12", history wording ("previously", "no longer", "used to be", "was changed", "now we") dated comments (`YYYY-MM-DD` or `YYYY/MM/DD`), decision/founder references, rollout labels (`R19`, `rc.2`) and reviewer notes. References to external upstreams such as `dotnet/runtime#12345` are allowed: they explain a workaround. `xml-docs: forbid` flags every new `///` line; `public-summary` allows only a one-line `/// <summary>` and flags the rest.
 

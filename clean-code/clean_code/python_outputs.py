@@ -25,7 +25,9 @@ class Mutations(ast.NodeVisitor):
 
     def statements(self, statements):
         for statement in statements:
-            self.visit(statement)
+            if self.visit(statement) is False:
+                return False
+        return True
 
     def visit(self, node):
         if isinstance(node, SCOPES):
@@ -33,7 +35,7 @@ class Mutations(ast.NodeVisitor):
         if isinstance(node, COMPREHENSIONS):
             self.comprehension(node)
             return
-        super().visit(node)
+        return super().visit(node)
 
     def aliases(self, node):
         return self.bindings.get(node.id, set()).copy() if isinstance(node, ast.Name) else set()
@@ -77,16 +79,32 @@ class Mutations(ast.NodeVisitor):
         endings = []
         for path in paths:
             self.bindings = {name: values.copy() for name, values in initial.items()}
-            self.statements(path)
-            endings.append(self.bindings)
+            if self.statements(path):
+                endings.append(self.bindings)
         self.bindings = {}
         for ending in endings:
             for name, values in ending.items():
                 self.bindings.setdefault(name, set()).update(values)
+        return bool(endings)
 
     def visit_If(self, node):
         self.visit(node.test)
-        self.branches([node.body, node.orelse])
+        return self.branches([node.body, node.orelse])
+
+    def visit_Return(self, node):
+        self.generic_visit(node)
+        return False
+
+    visit_Raise = visit_Return
+
+    def visit_With(self, node):
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars:
+                self.bind(item.optional_vars, set())
+        return self.statements(node.body)
+
+    visit_AsyncWith = visit_With
 
     def visit_For(self, node):
         self.visit(node.iter)

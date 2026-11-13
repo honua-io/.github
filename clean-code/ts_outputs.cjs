@@ -29,6 +29,7 @@ class Mutations {
   }
 
   aliases(node) {
+    if (!node) return new Set();
     if (ts.isParenthesizedExpression(node)) return this.aliases(node.expression);
     const symbol = ts.isIdentifier(node) ? this.checker.getSymbolAtLocation(node) : undefined;
     return new Set(symbol ? this.bindings.get(symbol) ?? [] : []);
@@ -49,10 +50,29 @@ class Mutations {
     const initial = copyBindings(this.bindings);
     const endings = paths.map((path) => {
       this.bindings = copyBindings(initial);
-      if (path) this.visit(path);
-      return this.bindings;
+      return !path || this.visit(path) !== false ? this.bindings : undefined;
     });
-    this.bindings = mergeBindings(endings);
+    this.bindings = mergeBindings(endings.filter(Boolean));
+    return endings.some(Boolean);
+  }
+
+  statements(nodes) {
+    for (const node of nodes) if (this.visit(node) === false) return false;
+    return true;
+  }
+
+  loop(node) {
+    if (node.initializer && !ts.isForOfStatement(node) && !ts.isForInStatement(node)) this.visit(node.initializer);
+    if (node.condition ?? node.expression) this.visit(node.condition ?? node.expression);
+    const initial = copyBindings(this.bindings);
+    if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+      const target = ts.isVariableDeclarationList(node.initializer)
+        ? node.initializer.declarations[0].name : node.initializer;
+      this.bind(target, undefined);
+    }
+    const fallsThrough = this.visit(node.statement) !== false;
+    if (node.incrementor && fallsThrough) this.visit(node.incrementor);
+    this.bindings = mergeBindings(fallsThrough ? [initial, this.bindings] : [initial]);
   }
 
   assignment(node) {
@@ -63,6 +83,13 @@ class Mutations {
   }
 
   visit(node) {
+    if (ts.isBlock(node)) return this.statements(node.statements);
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
+      if (node.expression) this.visit(node.expression);
+      return false;
+    }
+    if (ts.isWhileStatement(node) || ts.isForStatement(node)
+        || ts.isForOfStatement(node) || ts.isForInStatement(node)) return this.loop(node);
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
     if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
       this.visit(node.expression ?? node.condition);

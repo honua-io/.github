@@ -67,6 +67,36 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(path=path, source=source):
                 self.assertEqual(self.outputs(path, source), expected)
 
+    def test_indexed_assignment_preserves_evaluated_receiver(self):
+        for operator in ('=', '+=', '&&=', '||=', '??='):
+            source = f'function collect(items) {{ items[0] {operator} (items = []); }}'
+            with self.subTest(operator=operator):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+
+    def test_loop_break_and_continue_preserve_exit_bindings(self):
+        for control in ('break', 'continue'):
+            cases = [
+                ('a.py', f'def collect(items, flag):\n    alias = []\n    for i in range(2):\n        if flag:\n            alias = items\n            {control}\n        alias = []\n    alias.clear()\n'),
+                ('a.ts', f'function collect(items, flag) {{ let alias = []; for(let i=0;i<2;i++) {{ if(flag) {{ alias = items; {control}; }} alias = []; }} alias.push(1); }}'),
+            ]
+            for path, source in cases:
+                with self.subTest(path=path, control=control):
+                    self.assertEqual(self.outputs(path, source), {'items'})
+
+    def test_loop_control_runs_finally_and_skips_unreachable_mutation(self):
+        for control in ('break', 'continue'):
+            cases = [
+                ('a.py', f'def collect(items):\n    alias = []\n    for i in range(2):\n        try:\n            {control}\n        finally:\n            alias = []\n        items.clear()\n    alias.clear()\n'),
+                ('a.ts', f'function collect(items) {{ let alias = []; for(let i=0;i<2;i++) {{ try {{ {control}; }} finally {{ alias = []; }} items.push(1); }} alias.push(1); }}'),
+            ]
+            for path, source in cases:
+                with self.subTest(path=path, control=control):
+                    self.assertEqual(self.outputs(path, source), set())
+
+    def test_loop_else_does_not_overwrite_break_bindings(self):
+        source = 'def collect(items):\n    alias = []\n    for i in range(2):\n        alias = items\n        break\n    else:\n        alias = []\n    alias.clear()\n'
+        self.assertEqual(self.outputs('a.py', source), {'items'})
+
     def test_logical_assignments_preserve_skipped_binding(self):
         for operator in ('&&=', '||=', '??='):
             source = f'function collect(items, flag) {{ flag {operator} (items = []); items.push(1); }}'

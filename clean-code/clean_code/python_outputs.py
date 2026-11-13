@@ -47,7 +47,7 @@ class Mutations(ast.NodeVisitor):
         result = super().visit(node)
         if self.exits and isinstance(node, (ast.Call, ast.Attribute, ast.Subscript,
                                            ast.BinOp, ast.Compare, ast.Await)):
-            self.exits[-1].append((merge_bindings([self.bindings]), True))
+            self.exits[-1].append((merge_bindings([self.bindings]), 'throw'))
         return result
 
     def aliases(self, node):
@@ -121,33 +121,33 @@ class Mutations(ast.NodeVisitor):
 
     def exception_paths(self, node):
         normal, exits = self.captured_statements(node.body)
-        exceptional = merge_bindings([bindings for bindings, throws in exits if throws])
-        paths = [(bindings, False, throws) for bindings, throws in exits
-                 if not throws or not node.handlers or all(handler.type for handler in node.handlers)]
+        exceptional = merge_bindings([bindings for bindings, kind in exits if kind == 'throw'])
+        paths = [(bindings, False, kind) for bindings, kind in exits
+                 if kind != 'throw' or not node.handlers or all(handler.type for handler in node.handlers)]
         if normal:
             normal, other_exits = self.captured_statements(node.orelse)
-            paths.extend((bindings, False, throws) for bindings, throws in other_exits)
+            paths.extend((bindings, False, kind) for bindings, kind in other_exits)
             if normal:
-                paths.append((self.bindings, True, False))
+                paths.append((self.bindings, True, 'normal'))
         for handler in node.handlers if exceptional else []:
             self.bindings = merge_bindings([exceptional])
             if handler.name:
                 self.bindings[handler.name] = set()
             normal, handler_exits = self.captured_statements(handler.body)
             if normal:
-                paths.append((self.bindings, True, False))
-            paths.extend((bindings, False, throws) for bindings, throws in handler_exits)
+                paths.append((self.bindings, True, 'normal'))
+            paths.extend((bindings, False, kind) for bindings, kind in handler_exits)
         return paths
 
     def visit_Try(self, node):
         endings = []
-        for bindings, normal, throws in self.exception_paths(node):
+        for bindings, normal, kind in self.exception_paths(node):
             self.bindings = merge_bindings([bindings])
             final_normal, final_exits = self.captured_statements(node.finalbody)
             if self.exits:
                 self.exits[-1].extend(final_exits)
                 if final_normal and not normal:
-                    self.exits[-1].append((merge_bindings([self.bindings]), throws))
+                    self.exits[-1].append((merge_bindings([self.bindings]), kind))
             if normal and final_normal:
                 endings.append(self.bindings)
         self.bindings = merge_bindings(endings)
@@ -162,10 +162,12 @@ class Mutations(ast.NodeVisitor):
     def visit_Return(self, node):
         self.generic_visit(node)
         if self.exits:
-            self.exits[-1].append((merge_bindings([self.bindings]), isinstance(node, ast.Raise)))
+            self.exits[-1].append((merge_bindings([self.bindings]), 'throw' if isinstance(node, ast.Raise) else type(node).__name__.lower()))
         return False
 
     visit_Raise = visit_Return
+    visit_Break = visit_Return
+    visit_Continue = visit_Return
 
     def visit_With(self, node):
         for item in node.items:
@@ -176,25 +178,44 @@ class Mutations(ast.NodeVisitor):
 
     visit_AsyncWith = visit_With
 
-    def loop(self, body):
+    def loop(self, body, condition=None):
+        broken = []
         while True:
             initial = merge_bindings([self.bindings])
-            normal = self.statements(body)
-            self.bindings = merge_bindings([initial, self.bindings] if normal else [initial])
+            normal, exits = self.captured_statements(body)
+            continuing = [self.bindings] if normal else []
+            for bindings, kind in exits:
+                if kind == 'break':
+                    broken.append(bindings)
+                elif kind == 'continue':
+                    continuing.append(bindings)
+                elif self.exits:
+                    self.exits[-1].append((bindings, kind))
+            if continuing and condition:
+                self.bindings = merge_bindings(continuing)
+                self.visit(condition)
+                continuing = [self.bindings]
+            self.bindings = merge_bindings([initial, *continuing])
             if self.bindings == initial:
-                return
+                return broken
+
+    def loop_else(self, body, broken):
+        normal = self.statements(body)
+        endings = [self.bindings, *broken] if normal else broken
+        self.bindings = merge_bindings(endings)
+        return bool(endings)
 
     def visit_For(self, node):
         self.visit(node.iter)
-        self.loop([ast.Assign(targets=[node.target], value=ast.Constant(None)), *node.body])
-        self.statements(node.orelse)
+        broken = self.loop([ast.Assign(targets=[node.target], value=ast.Constant(None)), *node.body])
+        return self.loop_else(node.orelse, broken)
 
     visit_AsyncFor = visit_For
 
     def visit_While(self, node):
         self.visit(node.test)
-        self.loop([*node.body, node.test])
-        self.statements(node.orelse)
+        broken = self.loop(node.body, node.test)
+        return self.loop_else(node.orelse, broken)
 
     def comprehension(self, node):
         saved = self.bindings.copy()

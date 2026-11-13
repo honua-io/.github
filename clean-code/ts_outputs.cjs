@@ -9,6 +9,16 @@ function copyBindings(bindings) {
   return new Map([...bindings].map(([key, values]) => [key, new Set(values)]));
 }
 
+function mergeBindings(endings) {
+  const merged = new Map();
+  for (const ending of endings) {
+    for (const [symbol, names] of ending) {
+      merged.set(symbol, new Set([...(merged.get(symbol) ?? []), ...names]));
+    }
+  }
+  return merged;
+}
+
 class Mutations {
   constructor(functionNode, checker) {
     this.checker = checker;
@@ -42,13 +52,7 @@ class Mutations {
       if (path) this.visit(path);
       return this.bindings;
     });
-    this.bindings = new Map();
-    for (const ending of endings) {
-      for (const [symbol, names] of ending) {
-        if (!this.bindings.has(symbol)) this.bindings.set(symbol, new Set());
-        for (const name of names) this.bindings.get(symbol).add(name);
-      }
-    }
+    this.bindings = mergeBindings(endings);
   }
 
   assignment(node) {
@@ -71,18 +75,29 @@ class Mutations {
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
         && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) return this.assignment(node);
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const { expression, name } = node.expression;
-      if (MUTATORS.has(name.text)) {
-        for (const parameter of this.aliases(expression)) this.outputs.add(parameter);
-      }
-    }
-    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
-      if ([ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) this.mark(node.operand);
-    }
-    if (ts.isDeleteExpression(node)) this.mark(node.expression);
+    this.mutation(node);
     ts.forEachChild(node, (child) => this.visit(child));
   }
+
+  mutation(node) {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const { expression, name } = node.expression;
+      if (MUTATORS.has(name.text)) this.markCall(expression);
+    }
+    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
+      this.markUnary(node);
+    }
+    if (ts.isDeleteExpression(node)) this.mark(node.expression);
+  }
+
+  markCall(expression) {
+    for (const parameter of this.aliases(expression)) this.outputs.add(parameter);
+  }
+
+  markUnary(node) {
+    if ([ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) this.mark(node.operand);
+  }
+
 }
 
 function outputNames(functionNode, checker) {

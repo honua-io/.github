@@ -109,7 +109,7 @@ class Mutations {
     const { normal, exits } = this.capturedBlock(node.tryBlock);
     const exceptional = mergeBindings(exits.filter((exit) => exit.throws).map((exit) => exit.bindings));
     const paths = [{ bindings: this.bindings, normal }, { bindings: mergeBindings(exits.map((exit) => exit.bindings)), normal: false }];
-    if (node.catchClause) {
+    if (node.catchClause && exits.some((exit) => exit.throws)) {
       this.bindings = copyBindings(exceptional);
       if (node.catchClause.variableDeclaration) this.bind(node.catchClause.variableDeclaration.name, undefined);
       const caught = this.capturedBlock(node.catchClause.block);

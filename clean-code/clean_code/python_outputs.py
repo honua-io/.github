@@ -123,7 +123,7 @@ class Mutations(ast.NodeVisitor):
             normal, other_exits = self.captured_statements(node.orelse)
             exits.extend(other_exits)
         paths = [(self.bindings, normal), (merge_bindings([bindings for bindings, _ in exits]), False)]
-        for handler in node.handlers:
+        for handler in node.handlers if exceptional else []:
             self.bindings = merge_bindings([exceptional])
             if handler.name:
                 self.bindings[handler.name] = set()

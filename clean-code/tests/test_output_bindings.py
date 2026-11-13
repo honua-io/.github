@@ -71,6 +71,15 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(self.outputs(path, source), {'items'})
 
+    def test_return_does_not_enter_exception_handler(self):
+        cases = [
+            ('a.py', 'def collect(items, other):\n    try:\n        return\n    except Exception:\n        items = other\n    finally:\n        items.clear()\n'),
+            ('a.ts', 'function collect(items, other) { try { return; } catch { items = other; } finally { items.push(1); } }'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.outputs(path, source), {'items'})
+
     def test_safe_rebinding_before_finally_does_not_mutate_input(self):
         for path, source in [
             ('a.py', 'def collect(items):\n    try:\n        items = []\n    finally:\n        items.clear()\n'),

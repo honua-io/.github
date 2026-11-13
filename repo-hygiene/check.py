@@ -22,6 +22,56 @@ RUN_DIRECTORIES = {"coverage", "results", "review-screenshots"}
 SOURCE_ROOTS = {"src", "tests", "test", "scripts", "tools", "packages", "apps", "build", "eng"}
 SOURCE_SUFFIXES = {".cs", ".py", ".sh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".tsx",
                    ".jsx", ".sql", ".go", ".rs", ".java", ".proto", ".swift", ".kt"}
+TF_TOKEN = re.compile(r'//[^\n]*|\#[^\n]*|/\*.*?\*/|<<-?(\w+)\r?\n.*?^\s*\1\s*$|'
+                      r'"(?:\\.|[^"\\])*"|[A-Za-z_]\w*|[^\s]', re.MULTILINE | re.DOTALL)
+
+
+def trunk_owned(path):
+    name = PurePosixPath(path).name
+    return (bool(re.fullmatch(r"llms[^/]*\.txt", name)) or name == "CHANGELOG.md"
+            or path.startswith(("samples/dist/", "api-report/"))
+            or path == "docs/bundle-sizes.md")
+
+
+def backend_blocks(text):
+    tokens = [match.group() for match in TF_TOKEN.finditer(text)
+              if not match.group().startswith(("//", "#", "/*"))]
+    blocks = []
+    for index, token in enumerate(tokens[:-2]):
+        if token != "backend" or not re.fullmatch(r'"(?:\\.|[^"\\])*"|[A-Za-z_][\w-]*', tokens[index + 1]) or tokens[index + 2] != "{":
+            continue
+        depth = 1
+        end = index + 3
+        while end < len(tokens) and depth:
+            depth += (tokens[end] == "{") - (tokens[end] == "}")
+            end += 1
+        if depth:
+            raise ValueError("unterminated Terraform backend block")
+        blocks.append(tuple(tokens[index:end]))
+    return blocks
+
+
+def revision_text(repo, revision, path):
+    # Missing paths are expected on additions/deletions; other Git failures must fail closed.
+    paths = git_output(repo, "ls-tree", "-z", "--name-only", revision, "--", path).split(b"\0")
+    if path.encode("utf-8", errors="surrogateescape") not in paths:
+        return ""
+    return git_output(repo, "show", f"{revision}:{path}").decode("utf-8")
+
+
+def ownership_findings(repo, base, head):
+    paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
+                       base, head, "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
+    findings = []
+    for path in paths:
+        if trunk_owned(path):
+            findings.append((path, "derived file is owned by trunk/release automation"))
+        if path.endswith(".tf"):
+            before = backend_blocks(revision_text(repo, base, path))
+            after = backend_blocks(revision_text(repo, head, path))
+            if before != after:
+                findings.append((path, "tracked Terraform backend blocks may not change in a PR"))
+    return findings
 
 
 def gate_input_directory(path, policy):
@@ -141,12 +191,13 @@ def main():
     try:
         policy = load_policy(arguments.repo, arguments.base)
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
+        findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Repository hygiene could not evaluate the PR: {type(error).__name__}")
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:
             print(error.stderr.decode("utf-8", errors="replace").strip())
         return 1
-    findings = [(path, reason) for path in paths if (reason := violation(path, policy))]
+    findings.extend((path, reason) for path in paths if (reason := violation(path, policy)))
     for path, reason in findings:
         print(f"{json.dumps(path, ensure_ascii=True)}: {reason}")
     print(f"Repository hygiene: {len(paths)} added file(s), {len(findings)} violation(s).")

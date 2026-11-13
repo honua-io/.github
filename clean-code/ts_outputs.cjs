@@ -132,7 +132,11 @@ class Mutations {
 
   loopIteration(node) {
     const broken = [];
-    if (this.collectionLoop(node)) this.bind(this.loopTarget(node), undefined);
+    if (this.collectionLoop(node)) {
+      const target = this.loopTarget(node);
+      this.record(this.evaluatedReceiver(target));
+      this.bind(target, undefined);
+    }
     const { normal, exits } = this.capturedBlock(node.statement);
     const continuing = normal ? [this.bindings] : [];
     for (const exit of exits) {
@@ -302,8 +306,9 @@ class Mutations {
 
   call(node) {
     this.visit(node.expression);
-    const receiver = ts.isPropertyAccessExpression(node.expression) && MUTATORS.has(node.expression.name.text)
-      ? this.aliases(node.expression.expression) : new Set();
+    const callee = unwrap(node.expression);
+    const receiver = ts.isPropertyAccessExpression(callee) && MUTATORS.has(callee.name.text)
+      ? this.aliases(callee.expression) : new Set();
     for (const argument of node.arguments) this.visit(argument);
     this.record(receiver);
   }

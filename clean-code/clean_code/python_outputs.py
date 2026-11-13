@@ -228,6 +228,7 @@ class Mutations(ast.NodeVisitor):
         for item in node.items:
             self.visit(item.context_expr)
             if item.optional_vars:
+                self.visit(item.optional_vars)
                 self.bind(item.optional_vars, set())
         return self.statements(node.body)
 

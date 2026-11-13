@@ -8,6 +8,44 @@ class OutputBindings(unittest.TestCase):
         functions = lex_files({path: source})[path].functions
         return {parameter.name for function in functions for parameter in function.parameters if parameter.is_output}
 
+    def test_wrapped_typescript_mutator_calls(self):
+        cases = [
+            ('(items.push)(1);', {'items'}),
+            ('items.push!(1);', {'items'}),
+            ('(items.push as Function)(items = []);', {'items'}),
+            ('((items = []).push)!(1);', set()),
+            ('const copy = [...items]; (copy.push)(1);', set()),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), expected)
+
+    def test_typescript_collection_loop_assignment_targets(self):
+        cases = [
+            ('for (items[0] of [1]) {}', {'items'}),
+            ('for (items.key in {key: 1}) {}', {'items'}),
+            ('for (items[(items = [], 0)] of [1]) {}', {'items'}),
+            ('for ((items = [])[0] of [1]) {}', set()),
+            ('const copy = [...items]; for (copy[0] of [1]) {}', set()),
+            ('for (const items of [[]]) { items.push(1); }', set()),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.outputs('a.ts', f'function collect(items) {{ {body} }}'), expected)
+
+    def test_python_context_manager_assignment_targets(self):
+        cases = [
+            ('items[0]', {'items'}),
+            ('(local, items[0])', {'items'}),
+            ('items[(items := [0], 0)[1]]', {'items'}),
+            ('(items := [0])[0]', set()),
+            ('items', set()),
+        ]
+        for target, expected in cases:
+            source = f'def collect(items):\n    with factory() as {target}:\n        pass\n'
+            with self.subTest(target=target):
+                self.assertEqual(self.outputs('a.py', source), expected)
+
     def test_chained_comparison_rebinding_can_be_skipped(self):
         cases = [
             ('flag == 0 == (items := [])', {'items'}),

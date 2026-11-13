@@ -7,6 +7,7 @@ const MUTATORS = new Set([
 
 const HANDLERS = new Map([
   [ts.SyntaxKind.Block, "block"],
+  [ts.SyntaxKind.CallExpression, "call"],
   [ts.SyntaxKind.TryStatement, "tryStatement"],
   [ts.SyntaxKind.ReturnStatement, "terminate"],
   [ts.SyntaxKind.ThrowStatement, "terminate"],
@@ -22,6 +23,11 @@ const HANDLERS = new Map([
 
 function copyBindings(bindings) {
   return new Map([...bindings].map(([key, values]) => [key, new Set(values)]));
+}
+
+function sameBindings(left, right) {
+  return left.size === right.size && [...left].every(([key, values]) =>
+    values.size === right.get(key)?.size && [...values].every((value) => right.get(key).has(value)));
 }
 
 function mergeBindings(endings) {
@@ -47,6 +53,9 @@ class Mutations {
   aliases(node) {
     if (!node) return new Set();
     if (ts.isParenthesizedExpression(node)) return this.aliases(node.expression);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      return this.aliases(node.right);
+    }
     const symbol = ts.isIdentifier(node) ? this.checker.getSymbolAtLocation(node) : undefined;
     return new Set(symbol ? this.bindings.get(symbol) ?? [] : []);
   }
@@ -90,11 +99,15 @@ class Mutations {
     if (node.initializer && !this.collectionLoop(node)) this.visit(node.initializer);
     const condition = node.condition ?? node.expression;
     if (condition) this.visit(condition);
-    const initial = copyBindings(this.bindings);
-    if (this.collectionLoop(node)) this.bind(this.loopTarget(node), undefined);
-    const fallsThrough = this.visit(node.statement) !== false;
-    if (node.incrementor && fallsThrough) this.visit(node.incrementor);
-    this.bindings = mergeBindings(fallsThrough ? [initial, this.bindings] : [initial]);
+    let initial;
+    do {
+      initial = copyBindings(this.bindings);
+      if (this.collectionLoop(node)) this.bind(this.loopTarget(node), undefined);
+      const fallsThrough = this.visit(node.statement) !== false;
+      if (node.incrementor && fallsThrough) this.visit(node.incrementor);
+      if (node.condition && fallsThrough) this.visit(node.condition);
+      this.bindings = mergeBindings(fallsThrough ? [initial, this.bindings] : [initial]);
+    } while (!sameBindings(initial, this.bindings));
   }
 
   capturedBlock(block) {
@@ -149,8 +162,17 @@ class Mutations {
       ts.forEachChild(node, (child) => { this.visit(child); });
       return;
     }
-    this.visit(node.right);
     this.visit(node.left);
+    if ([ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
+      ts.SyntaxKind.QuestionQuestionEqualsToken].includes(node.operatorToken.kind)) {
+      const skipped = copyBindings(this.bindings);
+      this.visit(node.right);
+      this.mark(node.left);
+      this.bind(node.left, node.right);
+      this.bindings = mergeBindings([skipped, this.bindings]);
+      return;
+    }
+    this.visit(node.right);
     this.mark(node.left);
     if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) this.bind(node.left, node.right);
   }
@@ -180,29 +202,33 @@ class Mutations {
 
   visit(node) {
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    const handler = HANDLERS.get(node.kind);
+    let result;
+    if (handler) result = this[handler](node);
+    else {
+      this.mutation(node);
+      ts.forEachChild(node, (child) => { this.visit(child); });
+    }
     if (this.exits.length && (ts.isCallExpression(node) || ts.isNewExpression(node)
         || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
       this.exits.at(-1).push({ bindings: copyBindings(this.bindings), throws: true });
     }
-    const handler = HANDLERS.get(node.kind);
-    if (handler) return this[handler](node);
-    this.mutation(node);
-    ts.forEachChild(node, (child) => { this.visit(child); });
+    return result;
+  }
+
+  call(node) {
+    this.visit(node.expression);
+    const receiver = ts.isPropertyAccessExpression(node.expression) && MUTATORS.has(node.expression.name.text)
+      ? this.aliases(node.expression.expression) : new Set();
+    for (const argument of node.arguments) this.visit(argument);
+    for (const parameter of receiver) this.outputs.add(parameter);
   }
 
   mutation(node) {
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const { expression, name } = node.expression;
-      if (MUTATORS.has(name.text)) this.markCall(expression);
-    }
     if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
       this.markUnary(node);
     }
     if (ts.isDeleteExpression(node)) this.mark(node.expression);
-  }
-
-  markCall(expression) {
-    for (const parameter of this.aliases(expression)) this.outputs.add(parameter);
   }
 
   markUnary(node) {

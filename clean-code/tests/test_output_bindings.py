@@ -56,6 +56,45 @@ class OutputBindings(unittest.TestCase):
             with self.subTest(operator=operator):
                 self.assertEqual(self.outputs('a.ts', source), {'items'})
 
+    def test_mutator_receiver_is_resolved_before_arguments(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    items.append(items := [])\n', {'items'}),
+            ('a.py', 'def collect(items):\n    (items := []).clear()\n', set()),
+            ('a.ts', 'function collect(items) { items.push(items = []); }', {'items'}),
+            ('a.ts', 'function collect(items) { (items = []).push(1); }', set()),
+        ]
+        for path, source, expected in cases:
+            with self.subTest(path=path, source=source):
+                self.assertEqual(self.outputs(path, source), expected)
+
+    def test_logical_assignments_preserve_skipped_binding(self):
+        for operator in ('&&=', '||=', '??='):
+            source = f'function collect(items, flag) {{ flag {operator} (items = []); items.push(1); }}'
+            with self.subTest(operator=operator):
+                self.assertEqual(self.outputs('a.ts', source), {'items'})
+
+    def test_later_loop_iterations_retain_aliases(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    alias = []\n    for index in range(2):\n        alias.clear()\n        alias = items\n'),
+            ('a.ts', 'function collect(items) { let alias = []; for(let i=0;i<2;i++) { alias.push(1); alias = items; } }'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.outputs(path, source), {'items'})
+
+    def test_exception_snapshot_follows_argument_evaluation(self):
+        cases = [
+            ('a.py', 'def collect(items):\n    alias = []\n    try:\n        consume(alias := items)\n    except Exception:\n        alias.clear()\n'),
+            ('a.ts', 'function collect(items) { let alias = []; try { consume(alias = items); } catch { alias.push(1); } }'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.outputs(path, source), {'items'})
+
+    def test_exception_snapshot_follows_receiver_evaluation(self):
+        source = 'def collect(items):\n    try:\n        return (items := []).copy()\n    finally:\n        items.clear()\n'
+        self.assertEqual(self.outputs('a.py', source), set())
+
     def test_conditional_expression_preserves_skipped_binding(self):
         source = 'def collect(items, flag):\n    (items := []) if flag else None\n    items.clear()\n'
         self.assertEqual(self.outputs('a.py', source), {'items'})

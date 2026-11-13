@@ -44,12 +44,15 @@ class Mutations(ast.NodeVisitor):
         if isinstance(node, COMPREHENSIONS):
             self.comprehension(node)
             return
+        result = super().visit(node)
         if self.exits and isinstance(node, (ast.Call, ast.Attribute, ast.Subscript,
                                            ast.BinOp, ast.Compare, ast.Await)):
             self.exits[-1].append((merge_bindings([self.bindings]), True))
-        return super().visit(node)
+        return result
 
     def aliases(self, node):
+        if isinstance(node, ast.NamedExpr):
+            return self.aliases(node.target)
         return self.bindings.get(node.id, set()).copy() if isinstance(node, ast.Name) else set()
 
     def bind(self, target, aliases):
@@ -77,9 +80,11 @@ class Mutations(ast.NodeVisitor):
         self.bind(node.target, self.aliases(node.value))
 
     def visit_Call(self, node):
-        if isinstance(node.func, ast.Attribute) and node.func.attr in MUTATORS:
-            self.outputs.update(self.aliases(node.func.value))
-        self.generic_visit(node)
+        self.visit(node.func)
+        receiver = (self.aliases(node.func.value)
+                    if isinstance(node.func, ast.Attribute) and node.func.attr in MUTATORS else set())
+        self.statements([*node.args, *node.keywords])
+        self.outputs.update(receiver)
 
     def visit_Subscript(self, node):
         if isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -171,16 +176,24 @@ class Mutations(ast.NodeVisitor):
 
     visit_AsyncWith = visit_With
 
+    def loop(self, body):
+        while True:
+            initial = merge_bindings([self.bindings])
+            normal = self.statements(body)
+            self.bindings = merge_bindings([initial, self.bindings] if normal else [initial])
+            if self.bindings == initial:
+                return
+
     def visit_For(self, node):
         self.visit(node.iter)
-        self.branches([[], [ast.Assign(targets=[node.target], value=ast.Constant(None)), *node.body]])
+        self.loop([ast.Assign(targets=[node.target], value=ast.Constant(None)), *node.body])
         self.statements(node.orelse)
 
     visit_AsyncFor = visit_For
 
     def visit_While(self, node):
         self.visit(node.test)
-        self.branches([[], node.body])
+        self.loop([*node.body, node.test])
         self.statements(node.orelse)
 
     def comprehension(self, node):

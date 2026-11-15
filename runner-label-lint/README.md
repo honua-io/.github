@@ -55,3 +55,7 @@ Run locally against a checkout:
 python3 -I runner-label-lint/lint_runner_labels.py --repo /path/to/repo
 python3 -m unittest discover -s runner-label-lint/tests -p 'test_*.py'
 ```
+
+## Runner environment
+
+The reusable workflow uses `HONUA_LIGHT_RUNNER` for same-repository pull requests and falls back to `ubuntu-latest` for forks or an unset variable. Its first step exports `TMPDIR`, `TEMP` and `TMP` from the current job’s `RUNNER_TEMP`; this prevents persistent runners from inheriting a deleted temporary directory from an earlier job.

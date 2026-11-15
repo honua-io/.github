@@ -119,3 +119,7 @@ cd clean-code && PATH="$(./install.sh /tmp/clean-code-venv):$PATH" python3 -m un
 
 Each `tests/fixtures/rules/<rule>/` holds `bad.*` files that must trigger the rule and `good.*` files that must not.
 Each `tests/fixtures/comment_only/<case>/` holds a `base` and `head` file. `same-*` cases must verify as comment-only, `diff-*` cases must fail, and a `-removable` suffix runs with docstring removal allowed.
+
+## Runner environment
+
+The reusable workflow uses `HONUA_LIGHT_RUNNER` for same-repository pull requests and falls back to `ubuntu-latest` for forks or an unset variable. Its first step exports `TMPDIR`, `TEMP` and `TMP` from the current job’s `RUNNER_TEMP`; this prevents persistent runners from inheriting a deleted temporary directory from an earlier job.

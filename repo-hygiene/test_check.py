@@ -274,7 +274,7 @@ class GitDiffTests(unittest.TestCase):
         self.assertEqual(result.stdout.count("derived file is owned"), 2)
         self.assertNotIn('"CHANGELOG.md":', result.stdout)
         self.assertNotIn('"docs/CHANGELOG.md":', result.stdout)
-        self.assertIn('"docs/archive/CHANGELOG.md": history or run output belongs outside the product tree',
+        self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',
                       result.stdout)
 
     def test_terraform_resource_changes_and_backend_formatting_are_allowed(self):

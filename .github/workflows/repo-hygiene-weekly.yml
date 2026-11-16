@@ -1,0 +1,39 @@
+name: Weekly bundle exceptions
+
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: repo-hygiene
+      - name: Read organization PR metadata with the bot App
+        id: bot
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: honua-io
+          permission-pull-requests: read
+      - name: Require complete organization reporting access
+        env:
+          BOT_APP_ID: ${{ secrets.BOT_APP_ID }}
+          BOT_APP_PRIVATE_KEY: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          INSTALLATION_ID: ${{ steps.bot.outputs.installation-id }}
+        run: node repo-hygiene/app-coverage.cjs
+      - name: Print exception use by lane
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -o pipefail
+          python3 -I repo-hygiene/bundle.py summary | tee -a "$GITHUB_STEP_SUMMARY"

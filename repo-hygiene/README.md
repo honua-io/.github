@@ -46,3 +46,13 @@ python3 -m unittest discover -s repo-hygiene -p 'test_*.py'
 ## Runner environment
 
 The reusable workflow uses `HONUA_LIGHT_RUNNER` for same-repository pull requests and falls back to `ubuntu-latest` for forks or an unset variable. Its first step exports `TMPDIR`, `TEMP` and `TMP` from the current job’s `RUNNER_TEMP`; this prevents persistent runners from inheriting a deleted temporary directory from an earlier job.
+
+Maintainer repairs of release PRs retain the changelog exception only when the
+fetched release branch has at most four linear commits and every changed changelog
+is unchanged from its latest modifying commit, authenticated through GitHub as a
+verified, GitHub-signed commit by the PR's recognized release bot. The merge tree
+must preserve that changelog exactly. Missing credentials, incomplete history,
+manual changelog edits, unsigned commits and API failures retain the ownership
+failure. Other path, derived-file and Terraform checks continue independently.
+The existing read-only job token performs commit metadata reads; no additional
+job, write permission or PR code execution is needed.

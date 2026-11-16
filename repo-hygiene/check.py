@@ -224,7 +224,8 @@ def main():
         allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
         if allow_changelog:
-            findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"]
+            findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"
+                        or finding[0].startswith(("samples/dist/", "api-report/"))]
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Repository hygiene could not evaluate the PR: {type(error).__name__}")
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:

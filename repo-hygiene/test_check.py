@@ -267,11 +267,12 @@ class GitDiffTests(unittest.TestCase):
         self.assertEqual(self.check_event(event).returncode, 1)
 
     def test_release_exception_keeps_other_ownership_and_path_checks(self):
-        event = self.release_fixture(("docs/llms-full.txt", "docs/bundle-sizes.md"),
+        event = self.release_fixture(("docs/llms-full.txt", "docs/bundle-sizes.md",
+                                      "samples/dist/CHANGELOG.md", "api-report/CHANGELOG.md"),
                                      ("docs/archive/CHANGELOG.md",))
         result = self.check_event(event)
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertEqual(result.stdout.count("derived file is owned"), 2)
+        self.assertEqual(result.stdout.count("derived file is owned"), 4)
         self.assertNotIn('"CHANGELOG.md":', result.stdout)
         self.assertNotIn('"docs/CHANGELOG.md":', result.stdout)
         self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',

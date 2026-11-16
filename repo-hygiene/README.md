@@ -61,7 +61,7 @@ local or cross-repository references, and comma-separated lists. For example,
 `Closes #12, #13, honua-io/other#14` counts three distinct issues. Repeating a
 reference does not count again; comments, code examples and blockquotes do not
 count. The checker does not judge whether the issues are related: reviewers own
-that decision. Binary files contribute zero lines. The line count comes from the
+that decision. Binary files and unchanged renames contribute zero lines. The line count comes from the
 fetched Git trees; candidate code is never executed.
 
 Use this body metadata for a permitted exception and lane accounting:
@@ -88,8 +88,12 @@ the job log and Actions summary. PRs without lane metadata are explicitly
 unattributed. The report covers the past seven UTC calendar days and fails on
 incomplete or over-limit search results. Counts reflect labels and bodies at
 report time; removing a label after merge removes that PR from this report.
-The App must be installed on the repositories being reported and its credentials
-must be available to this repository; missing access fails the report.
+The workflow verifies via an authenticated read-only App API request that the
+installation belongs to honua-io, is active, and covers all repositories before
+running organization search. A selected-repository installation fails instead of
+silently omitting inaccessible repositories. Its credentials must be available
+to this repository; missing access fails the report. The local command assumes
+your authenticated token has the same organization coverage.
 
 Run the same report locally with authenticated read access:
 

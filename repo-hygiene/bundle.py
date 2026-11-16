@@ -34,9 +34,9 @@ RULE = ("Bundle rule: close at least 3 distinct issues, change at least 300 line
 def prose(body):
     """Exclude quoted examples from policy metadata."""
     text = re.sub(r"<!--.*?-->", "", body or "", flags=re.DOTALL)
-    text = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1[^\n]*$", "", text)
+    text = re.sub(r"(?ms)^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[^\n]*$|\Z)", "", text)
     text = re.sub(r"`[^`\n]*`", "", text)
-    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    return "\n".join(line for line in text.splitlines() if not line.startswith(("    ", "\t")) and not line.lstrip().startswith(">"))
 
 
 def closed_issues(body, repository):
@@ -68,14 +68,23 @@ def decision(pr, repository, changed_lines):
 
 def line_count(arguments):
     result = subprocess.run(
-        ["git", "-C", str(arguments.repo), "diff", "--no-ext-diff", "--no-renames",
+        ["git", "-C", str(arguments.repo), "diff", "--no-ext-diff", "--find-renames",
          "--numstat", "-z", arguments.base, arguments.head, "--"],
         check=True, capture_output=True,
     )
     # Binary changes have no line count. Count the exact fetched merge tree,
     # rather than trusting candidate-supplied metadata or checking out its code.
-    counts = [record.split(b"\t", 2)[:2] for record in result.stdout.split(b"\0") if record]
-    return sum(int(count) for pair in counts for count in pair if count != b"-")
+    records = iter(result.stdout.split(b"\0"))
+    total = 0
+    for record in records:
+        if not record:
+            continue
+        added, deleted, path = record.split(b"\t", 2)
+        if not path:
+            next(records)  # NUL-delimited old and new paths for a rename.
+            next(records)
+        total += sum(int(count) for count in (added, deleted) if count != b"-")
+    return total
 
 
 def check(arguments):

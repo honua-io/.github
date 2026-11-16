@@ -34,7 +34,8 @@ class BundlePolicyTests(unittest.TestCase):
         bodies = ["Closes #1, #1, honua-io/example#1", "See #1, #2, #3",
                   "Closes #1\n```md\nCloses #2, #3\n```",
                   "<!-- Closes #1, #2, #3 -->", "`Closes #1, #2, #3`",
-                  "> Closes #1, #2, #3", "Closes #0, #1, #2", "Closes #1abc, #2abc, #3abc"]
+                  "> Closes #1, #2, #3", "    Closes #1, #2, #3",
+                  "\tCloses #1, #2, #3", "```md\nCloses #1, #2, #3", "Closes #0, #1, #2", "Closes #1abc, #2abc, #3abc"]
         for body in bodies:
             with self.subTest(body=body):
                 self.assertFalse(self.passes(self.pr(body)))
@@ -119,6 +120,23 @@ class BundleGitTests(unittest.TestCase):
         args = argparse.Namespace(repo=self.repo, base=base, head="HEAD")
         self.assertEqual(BUNDLE.line_count(args), 300)
 
+    def test_unchanged_and_modified_renames_count_only_changed_lines(self):
+        old = self.repo / "old\tfile\n.txt"
+        old.write_text("same\n" * 150)
+        self.git("add", ".")
+        self.git("commit", "-qm", "before")
+        base = self.git("rev-parse", "HEAD")
+        renamed = self.repo / "new\tfile\n.txt"
+        old.rename(renamed)
+        self.git("add", ".")
+        self.git("commit", "-qm", "rename")
+        args = argparse.Namespace(repo=self.repo, base=base, head="HEAD")
+        self.assertEqual(BUNDLE.line_count(args), 0)
+        renamed.write_text(renamed.read_text() + "changed\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "edit")
+        self.assertEqual(BUNDLE.line_count(args), 1)
+
     def test_cli_fails_closed_with_missing_event(self):
         event = self.repo / "event.json"
         event.write_text(json.dumps({"repository": {"full_name": "honua-io/example"},
@@ -147,6 +165,50 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("permission-pull-requests: read", workflow)
         self.assertIn('tee -a "$GITHUB_STEP_SUMMARY"', workflow)
         self.assertIn("set -o pipefail", workflow)
+        self.assertIn("run: node repo-hygiene/app-coverage.cjs", workflow)
+        self.assertLess(workflow.index("run: node repo-hygiene/app-coverage.cjs"),
+                        workflow.index("repo-hygiene/bundle.py summary"))
+
+    def test_report_rejects_partial_suspended_or_wrong_organization_installations(self):
+        script = r"""
+const {requireOrganizationCoverage} = require('./repo-hygiene/app-coverage.cjs');
+const assert = require('node:assert/strict');
+const valid = {account: {login: 'honua-io', type: 'Organization'}, repository_selection: 'all'};
+assert.doesNotThrow(() => requireOrganizationCoverage(valid));
+for (const invalid of [{...valid, repository_selection: 'selected'},
+  {...valid, suspended_at: '2026-11-16'},
+  {...valid, account: {login: 'other', type: 'Organization'}},
+  {...valid, account: {login: 'honua-io', type: 'User'}}, {}]) {
+  assert.throws(() => requireOrganizationCoverage(invalid));
+}
+"""
+        subprocess.run(["node", "-e", script], cwd=ROOT.parent, check=True)
+
+    def test_report_verifies_installation_with_read_only_authenticated_request(self):
+        script = r"""
+const assert = require('node:assert/strict');
+const {generateKeyPairSync} = require('node:crypto');
+const {checkCoverage} = require('./repo-hygiene/app-coverage.cjs');
+const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048});
+process.env.BOT_APP_PRIVATE_KEY = privateKey.export({type: 'pkcs8', format: 'pem'});
+process.env.BOT_APP_ID = '123';
+process.env.INSTALLATION_ID = '456';
+global.fetch = async (url, options) => {
+  assert.equal(url, 'https://api.github.com/app/installations/456');
+  assert.equal(options.method, undefined);
+  assert.match(options.headers.Authorization, /^Bearer [^.]+\.[^.]+\.[^.]+$/);
+  return {ok: true, json: async () => ({account: {login: 'honua-io', type: 'Organization'},
+    repository_selection: 'all'})};
+};
+(async () => {
+  await checkCoverage();
+  global.fetch = async () => ({ok: false});
+  await assert.rejects(checkCoverage());
+  global.fetch = async () => {throw new Error('network unavailable')};
+  await assert.rejects(checkCoverage());
+})().catch(() => {process.exitCode = 1});
+"""
+        subprocess.run(["node", "-e", script], cwd=ROOT.parent, check=True)
 
 
 if __name__ == "__main__":

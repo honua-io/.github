@@ -7,6 +7,7 @@ import sys
 
 
 POLICY_PATH = ".github/hygiene.json"
+OWNERSHIP_REASON = "derived file is owned by trunk/release automation"
 SCRATCH = re.compile(r"^(?:\.flow|\.?(?:scratch|scratchpad|tmp|temp|wip))(?:$|[-_.])", re.IGNORECASE)
 HISTORY = re.compile(r"^\.?(?:evidence|audits?|archives?|reports?|receipts?|snapshots?|release-evidence)"
                      r"(?:$|[-_.])", re.IGNORECASE)
@@ -176,7 +177,7 @@ def ownership_findings(repo, base, head):
     findings = []
     for path in paths:
         if trunk_owned(path):
-            findings.append((path, "derived file is owned by trunk/release automation"))
+            findings.append((path, OWNERSHIP_REASON))
         if path.endswith(".tf"):
             before = backend_blocks(revision_text(repo, base, path))
             after = backend_blocks(revision_text(repo, head, path))
@@ -306,7 +307,8 @@ def main():
         allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
         if sdk_derived_allowed(arguments):
-            findings = [finding for finding in findings if not sdk_derived_path(finding[0])]
+            findings = [finding for finding in findings
+                        if finding[1] != OWNERSHIP_REASON or not sdk_derived_path(finding[0])]
         if allow_changelog:
             findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"
                         or finding[0].startswith(("samples/dist/", "api-report/"))]

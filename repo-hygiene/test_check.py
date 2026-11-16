@@ -316,6 +316,24 @@ class GitDiffTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("scratch belongs", result.stdout)
 
+    def test_generated_exception_retains_backend_guard_on_existing_outputs(self):
+        event = self.derived_fixture(extra_paths=["api-report/state.tf"])
+        branch = event["pull_request"]["head"]["ref"]
+        self.git("switch", branch)
+        self.write("api-report/state.tf", 'terraform { backend "s3" { bucket = "state" } }\n')
+        self.git("add", ".")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "commit", "--amend", "--no-edit")
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("tracked Terraform backend blocks may not change", result.stdout)
+        self.assertNotIn("derived file is owned", result.stdout)
+
     def release_fixture(self, extra_paths=(), new_paths=()):
         self.write("CHANGELOG.md", "original\n")
         self.write("docs/CHANGELOG.md", "original\n")

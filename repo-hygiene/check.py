@@ -116,10 +116,10 @@ def sdk_derived_path(path):
             and (path in SDK_DERIVED_FILES or path.startswith(SDK_DERIVED_PREFIXES)))
 
 
-def sdk_derived_allowed(repo, base, head, event_path):
-    if event_path is None:
+def sdk_derived_allowed(arguments):
+    if arguments.event is None:
         return False
-    event = json.loads(event_path.read_text())
+    event = json.loads(arguments.event.read_text())
     pr = event.get("pull_request", {})
     # The write-enabled producer validates the generated bundle before this App
     # publishes it. A branch name or commit author alone grants no exception.
@@ -137,31 +137,37 @@ def sdk_derived_allowed(repo, base, head, event_path):
             or not re.fullmatch(r"automation/derived-artifacts-[1-9][0-9]*-[1-9][0-9]*",
                                 candidate.get("ref", ""))):
         return False
-    parents = git_output(repo, "rev-list", "--parents", "-n", "1", head).decode().split()
-    base_sha = git_output(repo, "rev-parse", base).decode().strip()
-    if (len(parents) != 3 or parents[1] != base_sha or parents[1] != source.get("sha")
+    parents = git_output(arguments.repo, "rev-list", "--parents", "-n", "1", arguments.head).decode().split()
+    base_sha = git_output(arguments.repo, "rev-parse", arguments.base).decode().strip()
+    merge_fields = 3  # Merge SHA plus its two parents.
+    if (len(parents) != merge_fields or parents[1] != base_sha or parents[1] != source.get("sha")
             or parents[2] != candidate.get("sha")):
         return False
-    # Require the producer's one-to-four linear commits atop the exact event
-    # base. Five entries suffice to reject an unbounded or divergent history.
-    chain = git_output(repo, "rev-list", "--parents", "--max-count=5",
-                       parents[2], "^" + base_sha).decode().splitlines()
-    expected = parents[2]
-    if not 1 <= len(chain) <= 4:
+    if not sdk_producer_chain(arguments.repo, base_sha, parents[2]):
+        return False
+    paths = git_output(arguments.repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
+                       base_sha, parents[2], "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
+    return bool(paths) and all(sdk_derived_path(path) for path in paths)
+
+
+def sdk_producer_chain(repo, base_sha, candidate_sha):
+    # Five entries suffice to reject a chain beyond the producer's four commits.
+    maximum_commits = 4
+    linear_fields = 2  # Each commit SHA followed by its single parent.
+    chain = git_output(repo, "rev-list", "--parents", f"--max-count={maximum_commits + 1}",
+                       candidate_sha, "^" + base_sha).decode().splitlines()
+    expected = candidate_sha
+    if not 1 <= len(chain) <= maximum_commits:
         return False
     for line in chain:
         commit = line.split()
-        if len(commit) != 2 or commit[0] != expected:
+        if len(commit) != linear_fields or commit[0] != expected:
             return False
         subject = git_output(repo, "show", "-s", "--format=%s", commit[0]).decode().strip()
         if not subject.startswith("chore(evidence): regenerate derived artifacts"):
             return False
         expected = commit[1]
-    if expected != base_sha:
-        return False
-    paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
-                       base_sha, parents[2], "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
-    return bool(paths) and all(sdk_derived_path(path) for path in paths)
+    return expected == base_sha
 
 
 def ownership_findings(repo, base, head):
@@ -299,7 +305,7 @@ def main():
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
         allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
-        if sdk_derived_allowed(arguments.repo, arguments.base, arguments.head, arguments.event):
+        if sdk_derived_allowed(arguments):
             findings = [finding for finding in findings if not sdk_derived_path(finding[0])]
         if allow_changelog:
             findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"

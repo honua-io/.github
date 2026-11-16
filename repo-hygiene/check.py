@@ -86,7 +86,8 @@ def release_changelog_allowed(repo, head, event_path):
         return False
     # Bind trusted event metadata to the fetched PR merge tree, never a later branch tip.
     parents = git_output(repo, "rev-list", "--parents", "-n", "1", head).decode().split()
-    if len(parents) != 3 or parents[2] != candidate.get("sha"):
+    merge_fields = 3  # Merge SHA plus its two parents.
+    if len(parents) != merge_fields or parents[2] != candidate.get("sha"):
         return False
     if sender.get("type") == "Bot" and sender.get("id") == identity:
         return True
@@ -94,7 +95,7 @@ def release_changelog_allowed(repo, head, event_path):
     # every changed changelog against the original, signed release-bot commit.
     if sender.get("type") != "User" or not isinstance(sender.get("id"), int) or sender["id"] <= 0:
         return False
-    return repaired_release_changelogs(repo, parents[1], parents[2], head, repository, author)
+    return repaired_release_changelogs(repo, parents, event)
 
 
 def verified_release_commit(repository, sha, author):
@@ -108,23 +109,28 @@ def verified_release_commit(repository, sha, author):
         verification = commit.get("commit", {}).get("verification", {})
         signer = commit.get("committer", {})
         creator = commit.get("author", {})
+        web_flow_id = 19864447
         return (commit.get("sha") == sha and verification.get("verified") is True
                 and verification.get("reason") == "valid"
-                and signer.get("login") == "web-flow" and signer.get("id") == 19864447
+                and signer.get("login") == "web-flow" and signer.get("id") == web_flow_id
                 and signer.get("type") == "User"
                 and all(creator.get(key) == author.get(key) for key in ("login", "id", "type")))
     except (OSError, ValueError, subprocess.SubprocessError):
         return False
 
 
-def repaired_release_changelogs(repo, base, candidate, merge, repository, author):
+def repaired_release_changelogs(repo, revisions, event):
+    merge, base, candidate = revisions
+    repository = event["repository"]["full_name"]
+    author = event["pull_request"]["user"]
     # The shallow fetch retains at most four release/repair commits. Reject
     # incomplete or nonlinear histories rather than trusting author strings.
     limit = 4
     rows = git_output(repo, "rev-list", "--parents", f"--max-count={limit + 1}",
                       f"{base}..{candidate}").decode().splitlines()
     chain = [row.split() for row in rows]
-    if not chain or len(chain) > limit or any(len(row) != 2 for row in chain):
+    linear_fields = 2  # Commit SHA plus its single parent.
+    if not chain or len(chain) > limit or any(len(row) != linear_fields for row in chain):
         return False
     if any(row[1] != next_row[0] for row, next_row in zip(chain, chain[1:])):
         return False

@@ -59,6 +59,35 @@ def revision_text(repo, revision, path):
     return git_output(repo, "show", f"{revision}:{path}").decode("utf-8")
 
 
+def release_changelog_allowed(repo, head, event_path):
+    if event_path is None:
+        return False
+    event = json.loads(event_path.read_text())
+    pr = event.get("pull_request", {})
+    author = pr.get("user", {})
+    sender = event.get("sender", {})
+    identities = {"honua-io-bot[bot]": 321210756, "github-actions[bot]": 41898282}
+    identity = identities.get(author.get("login"))
+    if identity is None or any(user.get("type") != "Bot" or user.get("id") != identity
+                               for user in (author, sender)):
+        return False
+    repository = event.get("repository", {}).get("full_name")
+    base = pr.get("base", {})
+    candidate = pr.get("head", {})
+    if not repository or any(ref.get("repo", {}).get("full_name") != repository
+                             for ref in (base, candidate)):
+        return False
+    branch = base.get("ref", "")
+    prefix = f"release-please--branches--{branch}"
+    release_ref = candidate.get("ref", "")
+    if not branch or not (release_ref == prefix or
+                          re.fullmatch(re.escape(prefix) + r"--components--[A-Za-z0-9._-]+", release_ref)):
+        return False
+    # Bind trusted event metadata to the fetched PR merge tree, never a later branch tip.
+    parents = git_output(repo, "rev-list", "--parents", "-n", "1", head).decode().split()
+    return len(parents) == 3 and parents[2] == candidate.get("sha")
+
+
 def ownership_findings(repo, base, head):
     paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
                        base, head, "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
@@ -187,11 +216,15 @@ def main():
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--event", type=Path, help="Trusted GitHub pull_request event payload (workflow only).")
     arguments = parser.parse_args()
     try:
         policy = load_policy(arguments.repo, arguments.base)
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
+        allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
+        if allow_changelog:
+            findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"]
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Repository hygiene could not evaluate the PR: {type(error).__name__}")
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:

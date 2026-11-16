@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent
@@ -420,6 +421,143 @@ class GitDiffTests(unittest.TestCase):
         # A non-merge commit cannot acquire the exemption using copied event metadata.
         self.git("checkout", "--detach", event["pull_request"]["head"]["sha"])
         self.assertEqual(self.check_event(event).returncode, 1)
+
+    def repaired_release_fixture(self, paths=None, count=1):
+        event = self.release_fixture()
+        anchor = event["pull_request"]["head"]["sha"]
+        self.git("switch", event["pull_request"]["head"]["ref"])
+        for index in range(count):
+            for path, content in (paths or {"docs/repair.md": "maintainer repair"}).items():
+                self.write(path, content + str(index))
+            self.commit()
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "main")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", event["pull_request"]["head"]["ref"])
+        event["sender"] = {"login": "maintainer", "id": 123, "type": "User"}
+        return event, anchor
+
+    def release_allowed(self, event):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            path.write_text(json.dumps(event))
+            return RULES.release_changelog_allowed(self.repo, "HEAD", path)
+
+    def test_maintainer_repair_preserves_verified_bot_changelogs(self):
+        event, anchor = self.repaired_release_fixture(count=3)
+        with mock.patch.object(RULES, "verified_release_commit", return_value=True) as verify:
+            self.assertTrue(self.release_allowed(event))
+            verify.assert_called_once_with("honua-io/example", anchor, event["pull_request"]["user"])
+        with mock.patch.object(RULES, "verified_release_commit", return_value=False):
+            self.assertFalse(self.release_allowed(event))
+
+    def test_maintainer_cannot_change_changelog_using_old_bot_commit(self):
+        event, anchor = self.repaired_release_fixture({"CHANGELOG.md": "manual edit"})
+        with mock.patch.object(RULES, "verified_release_commit", side_effect=lambda repo, sha, user: sha == anchor):
+            self.assertFalse(self.release_allowed(event))
+
+    def test_maintainer_release_history_bound_fails_closed(self):
+        event, _ = self.repaired_release_fixture(count=4)
+        with mock.patch.object(RULES, "verified_release_commit", return_value=True) as verify:
+            self.assertFalse(self.release_allowed(event))
+            verify.assert_not_called()
+
+    def test_maintainer_release_rejects_non_merge_or_mismatched_head(self):
+        event, _ = self.repaired_release_fixture()
+        with mock.patch.object(RULES, "verified_release_commit", return_value=True):
+            changed = json.loads(json.dumps(event))
+            changed["pull_request"]["head"]["sha"] = self.base
+            self.assertFalse(self.release_allowed(changed))
+            self.git("checkout", "--detach", event["pull_request"]["head"]["sha"])
+            self.assertFalse(self.release_allowed(event))
+
+    def test_maintainer_exception_keeps_other_ownership_findings(self):
+        event, _ = self.repaired_release_fixture({"docs/llms-full.txt": "manual output"})
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(json.dumps(event))
+            argv = ["check.py", "--repo", str(self.repo), "--base", self.base,
+                    "--head", "HEAD", "--event", str(event_path)]
+            with mock.patch.object(RULES, "verified_release_commit", return_value=True), \
+                    mock.patch("sys.argv", argv), mock.patch("builtins.print") as output:
+                self.assertEqual(RULES.main(), 1)
+                printed = "\n".join(str(call.args[0]) for call in output.call_args_list)
+                self.assertIn('"docs/llms-full.txt": derived file is owned', printed)
+                self.assertNotIn('"CHANGELOG.md":', printed)
+                self.assertNotIn('"docs/CHANGELOG.md":', printed)
+
+    def test_maintainer_exception_rejects_a_merge_in_release_history(self):
+        event, _ = self.repaired_release_fixture()
+        branch = event["pull_request"]["head"]["ref"]
+        self.git("switch", branch)
+        self.git("switch", "-c", "repair-side")
+        self.write("docs/side.md", "side change")
+        self.commit()
+        self.git("switch", branch)
+        self.write("docs/other.md", "other change")
+        self.commit()
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", "repair-side")
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "main")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        with mock.patch.object(RULES, "verified_release_commit", return_value=True) as verify:
+            self.assertFalse(self.release_allowed(event))
+            verify.assert_not_called()
+
+    def test_maintainer_exception_rejects_shallow_incomplete_history(self):
+        event, _ = self.repaired_release_fixture()
+        shallow = self.git("rev-parse", "--git-path", "shallow")
+        shallow_path = Path(shallow)
+        if not shallow_path.is_absolute():
+            shallow_path = self.repo / shallow_path
+        shallow_path.write_text(event["pull_request"]["head"]["sha"] + "\n")
+        with mock.patch.object(RULES, "verified_release_commit", return_value=True) as verify:
+            self.assertFalse(self.release_allowed(event))
+            verify.assert_not_called()
+
+    def test_release_signature_and_bot_identity_are_all_required(self):
+        author = {"login": "honua-io-bot[bot]", "id": 321210756, "type": "Bot"}
+        sha = "a" * 40
+        signed = {"sha": sha, "author": author, "committer": {
+            "login": "web-flow", "id": 19864447, "type": "User"},
+            "commit": {"verification": {"verified": True, "reason": "valid"}}}
+        changes = [((), None), (("sha",), "b" * 40), (("author", "id"), 1),
+                   (("author", "login"), "pretend[bot]"), (("author", "type"), "User"),
+                   (("committer", "id"), 1), (("committer", "login"), "pretend"),
+                   (("committer", "type"), "Bot"), (("commit", "verification", "verified"), False),
+                   (("commit", "verification", "reason"), "unsigned")]
+        for keys, value in changes:
+            document = json.loads(json.dumps(signed))
+            if keys:
+                target = document
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+            result = subprocess.CompletedProcess([], 0, stdout=json.dumps(document).encode())
+            with self.subTest(keys=keys), mock.patch.dict(RULES.os.environ, {"GH_TOKEN": "fixture"}), \
+                    mock.patch.object(RULES.subprocess, "run", return_value=result) as request:
+                self.assertEqual(RULES.verified_release_commit("honua-io/example", sha, author), not keys)
+                args = request.call_args.args[0]
+                self.assertEqual(args, ["gh", "api", "--hostname", "github.com",
+                                        f"repos/honua-io/example/commits/{sha}"])
+
+    def test_release_api_errors_and_absent_credentials_fail_closed(self):
+        author = {"login": "honua-io-bot[bot]", "id": 321210756, "type": "Bot"}
+        errors = [OSError("unavailable"), subprocess.CalledProcessError(403, "gh"),
+                  subprocess.TimeoutExpired("gh", 30)]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.dict(RULES.os.environ, {"GH_TOKEN": "fixture"}), \
+                    mock.patch.object(RULES.subprocess, "run", side_effect=error):
+                self.assertFalse(RULES.verified_release_commit("honua-io/example", "a" * 40, author))
+        with mock.patch.dict(RULES.os.environ, {}, clear=True), \
+                mock.patch.object(RULES.subprocess, "run") as request:
+            self.assertFalse(RULES.verified_release_commit("honua-io/example", "a" * 40, author))
+            request.assert_not_called()
 
     def test_release_exception_keeps_other_ownership_and_path_checks(self):
         event = self.release_fixture(("docs/llms-full.txt", "docs/bundle-sizes.md",

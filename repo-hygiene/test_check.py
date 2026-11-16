@@ -195,6 +195,127 @@ class GitDiffTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
 
+    def derived_fixture(self, subjects=None, extra_paths=(), new_paths=()):
+        paths = ("llms.txt", "llms-full.txt", "docs/bundle-sizes.md",
+                 "api-report/stable-api.json", "samples/dist/app.js", *extra_paths)
+        self.write(RULES.POLICY_PATH, json.dumps({
+            "roots": [".github/", "docs/", "README.md", "llms.txt", "llms-full.txt",
+                      "api-report/", "samples/", "src/"]}))
+        for path in paths:
+            self.write(path, "old\n")
+        self.base = self.commit()
+        self.git("branch", "-m", "trunk")
+        branch = "automation/derived-artifacts-43832728979-1"
+        self.git("switch", "-c", branch)
+        for path in (*paths, *new_paths):
+            self.write(path, "generated\n")
+        self.git("add", ".")
+        for subject in subjects or ["chore(evidence): regenerate derived artifacts"]:
+            self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                     "commit", "--allow-empty", "-m", subject)
+        candidate = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        identity = {"login": "honua-io-bot[bot]", "id": 321210756, "type": "Bot"}
+        repository = {"full_name": "honua-io/honua-sdk-js"}
+        return {"repository": repository, "sender": dict(identity), "pull_request": {
+            "user": dict(identity), "base": {"repo": repository, "ref": "trunk", "sha": self.base},
+            "head": {"repo": repository, "ref": branch, "sha": candidate}}}
+
+    def test_generated_bot_bundle_passes_but_ordinary_pr_does_not(self):
+        event = self.derived_fixture()
+        self.assertEqual(self.check_event(event).returncode, 0)
+        self.assertEqual(self.check().returncode, 1)
+        for keys, value in [
+                (("sender", "id"), 1), (("sender", "type"), "User"),
+                (("pull_request", "user", "id"), 1),
+                (("pull_request", "user", "login"), "lookalike[bot]"),
+                (("pull_request", "head", "repo", "full_name"), "fork/honua-sdk-js"),
+                (("pull_request", "base", "repo", "full_name"), "honua-io/other"),
+                (("repository", "full_name"), "honua-io/other"),
+                (("pull_request", "base", "ref"), "other"),
+                (("pull_request", "base", "sha"), "0" * 40),
+                (("pull_request", "head", "sha"), self.base),
+                (("pull_request", "head", "ref"), "automation/derived-artifacts-1-1-extra"),
+                (("pull_request", "head", "ref"), "automation/derived-artifacts-0-1")]:
+            with self.subTest(keys=keys, value=value):
+                altered = json.loads(json.dumps(event))
+                target = altered
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+                self.assertEqual(self.check_event(altered).returncode, 1)
+
+    def test_generated_four_commit_producer_chain_passes(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts: stage" for _ in range(4)])
+        self.assertEqual(self.check_event(event).returncode, 0)
+
+    def test_generated_chain_works_in_the_blob_filtered_bare_checkout(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts" for _ in range(4)])
+        self.git("config", "uploadpack.allowFilter", "true")
+        self.git("config", "uploadpack.allowAnySHA1InWant", "true")
+        bare = self.repo / "candidate.git"
+        fetched = subprocess.run(["bash", str(ROOT / "fetch-candidate.sh"), str(bare),
+                                  "file://" + str(self.repo), self.git("rev-parse", "HEAD")],
+                                 capture_output=True, text=True)
+        self.assertEqual(fetched.returncode, 0, fetched.stderr)
+        payload = self.git("rev-parse", "HEAD:llms.txt")
+        event_path = self.repo / "event.json"
+        event_path.write_text(json.dumps(event))
+        result = subprocess.run(["python3", "-I", str(ROOT / "check.py"), "--repo", str(bare),
+                                 "--base", "FETCH_HEAD^1", "--head", "FETCH_HEAD",
+                                 "--event", str(event_path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        missing = subprocess.check_output(["git", "-C", str(bare), "rev-list", "--objects",
+                                           "--missing=print", "FETCH_HEAD"], text=True)
+        self.assertIn("?" + payload, missing.splitlines())
+
+    def test_generated_exception_rejects_a_non_merge_head(self):
+        event = self.derived_fixture()
+        self.git("reset", "--hard", event["pull_request"]["head"]["sha"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_exception_rejects_a_merged_side_branch(self):
+        event = self.derived_fixture()
+        self.git("switch", "-c", "side", self.base)
+        self.write("README.md", "side\n")
+        self.commit()
+        self.git("switch", "automation/derived-artifacts-43832728979-1")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "-m", "chore(evidence): regenerate derived artifacts", "side")
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", "automation/derived-artifacts-43832728979-1")
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_five_commit_chain_fails_closed(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts" for _ in range(5)])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_unexpected_subject_fails_closed(self):
+        event = self.derived_fixture(subjects=["human update"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_bundle_with_source_change_gets_no_ownership_exception(self):
+        event = self.derived_fixture(extra_paths=["src/client.ts"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_changelog_remains_owned(self):
+        event = self.derived_fixture(extra_paths=["api-report/CHANGELOG.md"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_exception_retains_added_file_policy(self):
+        event = self.derived_fixture(new_paths=["api-report/scratch/leak.md"])
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("scratch belongs", result.stdout)
+
     def release_fixture(self, extra_paths=(), new_paths=()):
         self.write("CHANGELOG.md", "original\n")
         self.write("docs/CHANGELOG.md", "original\n")

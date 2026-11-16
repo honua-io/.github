@@ -46,3 +46,21 @@ python3 -m unittest discover -s repo-hygiene -p 'test_*.py'
 ## Runner environment
 
 The reusable workflow uses `HONUA_LIGHT_RUNNER` for same-repository pull requests and falls back to `ubuntu-latest` for forks or an unset variable. Its first step exports `TMPDIR`, `TEMP` and `TMP` from the current job’s `RUNNER_TEMP`; this prevents persistent runners from inheriting a deleted temporary directory from an earlier job.
+
+## SDK regeneration ownership
+
+The SDK's `regenerate-derived-artifacts.yml` producer validates each bundle before
+its bot publishes a PR. Ownership enforcement accepts these bundles only for
+`honua-io/honua-sdk-js`, with the trusted event's numeric bot author and sender
+identity, same-repository refs, and the producer's numbered automation branch.
+The fetched merge must bind the exact event head and trunk base. Its head must
+contain one to four linear commits atop that base, with the producer's commit
+subject and every changed path inside the producer allowlist. Base drift fails
+closed; the producer already retires stale regeneration PRs.
+
+This exception only removes generated-file ownership findings. Added-path policy,
+reserved outputs, changelog ownership, and Terraform backend checks remain active.
+No event payload means no exception. The bot identity authenticates publication;
+branch names and commit metadata do not authenticate a human-authored PR.
+Caller repositories must update their immutable reusable-workflow pin to adopt
+this change (and the earlier authenticated Release Please changelog exception).

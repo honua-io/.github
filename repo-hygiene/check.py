@@ -88,6 +88,82 @@ def release_changelog_allowed(repo, head, event_path):
     return len(parents) == 3 and parents[2] == candidate.get("sha")
 
 
+
+# Mirrors the SDK producer's publication allowlist. This permits ownership changes
+# only; the trusted-base added-path policy remains independently enforced.
+SDK_DERIVED_FILES = {
+    "README.md", "bench/cross-sdk/corpus.json", "docs/bundle-sizes.md",
+    "docs/comparison.md", "docs/errors.md", "docs/generated/mcp-eval-scorecard.md",
+    "docs/generated/sample-catalog.md", "llms.txt", "llms-full.txt",
+    "samples/catalog.v2.json", "samples/contract/v2/migrations/catalog.v1-to-v2.json",
+    "samples/contract/v2/release-matrix-lanes.v1.json",
+    *(f"samples/contract/v2/consumer-fixtures/honua-site-consumer.v{version}.json"
+      for version in (2, 3, 4)),
+}
+SDK_DERIVED_PREFIXES = (
+    "api-report/", "examples/migration-workbench/public/artifacts/",
+    "examples/migration-workbench/src/generated/",
+    "examples/ai-spatial-app-builder/evidence/",
+    "examples/realtime-incident-dashboard/evidence/",
+    "examples/spatial-analytics-workbench/evidence/", "samples/dist/",
+    "samples/evidence/imagery-cog-quickstart/", "samples/evidence/maplibre-quickstart/",
+    "samples/evidence/migration-workbench/", "samples/evidence/service-explorer/",
+)
+
+
+def sdk_derived_path(path):
+    return (PurePosixPath(path).name != "CHANGELOG.md"
+            and (path in SDK_DERIVED_FILES or path.startswith(SDK_DERIVED_PREFIXES)))
+
+
+def sdk_derived_allowed(repo, base, head, event_path):
+    if event_path is None:
+        return False
+    event = json.loads(event_path.read_text())
+    pr = event.get("pull_request", {})
+    # The write-enabled producer validates the generated bundle before this App
+    # publishes it. A branch name or commit author alone grants no exception.
+    identities = {"honua-io-bot[bot]": 321210756, "github-actions[bot]": 41898282}
+    author = pr.get("user", {})
+    identity = identities.get(author.get("login"))
+    if identity is None or any(user.get("id") != identity or user.get("type") != "Bot"
+                               for user in (author, event.get("sender", {}))):
+        return False
+    repository = "honua-io/honua-sdk-js"
+    source, candidate = pr.get("base", {}), pr.get("head", {})
+    if (event.get("repository", {}).get("full_name") != repository
+            or any(ref.get("repo", {}).get("full_name") != repository for ref in (source, candidate))
+            or source.get("ref") != "trunk"
+            or not re.fullmatch(r"automation/derived-artifacts-[1-9][0-9]*-[1-9][0-9]*",
+                                candidate.get("ref", ""))):
+        return False
+    parents = git_output(repo, "rev-list", "--parents", "-n", "1", head).decode().split()
+    base_sha = git_output(repo, "rev-parse", base).decode().strip()
+    if (len(parents) != 3 or parents[1] != base_sha or parents[1] != source.get("sha")
+            or parents[2] != candidate.get("sha")):
+        return False
+    # Require the producer's one-to-four linear commits atop the exact event
+    # base. Five entries suffice to reject an unbounded or divergent history.
+    chain = git_output(repo, "rev-list", "--parents", "--max-count=5",
+                       parents[2], "^" + base_sha).decode().splitlines()
+    expected = parents[2]
+    if not 1 <= len(chain) <= 4:
+        return False
+    for line in chain:
+        commit = line.split()
+        if len(commit) != 2 or commit[0] != expected:
+            return False
+        subject = git_output(repo, "show", "-s", "--format=%s", commit[0]).decode().strip()
+        if not subject.startswith("chore(evidence): regenerate derived artifacts"):
+            return False
+        expected = commit[1]
+    if expected != base_sha:
+        return False
+    paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
+                       base_sha, parents[2], "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
+    return bool(paths) and all(sdk_derived_path(path) for path in paths)
+
+
 def ownership_findings(repo, base, head):
     paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
                        base, head, "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
@@ -223,6 +299,8 @@ def main():
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
         allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
+        if sdk_derived_allowed(arguments.repo, arguments.base, arguments.head, arguments.event):
+            findings = [finding for finding in findings if not sdk_derived_path(finding[0])]
         if allow_changelog:
             findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"
                         or finding[0].startswith(("samples/dist/", "api-report/"))]

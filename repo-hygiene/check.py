@@ -59,9 +59,9 @@ def revision_text(repo, revision, path):
     return git_output(repo, "show", f"{revision}:{path}").decode("utf-8")
 
 
-def release_changelog_allowed(repo, head, event_path):
+def trusted_automation_pr(repo, head, event_path):
     if event_path is None:
-        return False
+        return None
     event = json.loads(event_path.read_text())
     pr = event.get("pull_request", {})
     author = pr.get("user", {})
@@ -70,22 +70,37 @@ def release_changelog_allowed(repo, head, event_path):
     identity = identities.get(author.get("login"))
     if identity is None or any(user.get("type") != "Bot" or user.get("id") != identity
                                for user in (author, sender)):
-        return False
+        return None
     repository = event.get("repository", {}).get("full_name")
     base = pr.get("base", {})
     candidate = pr.get("head", {})
     if not repository or any(ref.get("repo", {}).get("full_name") != repository
                              for ref in (base, candidate)):
-        return False
-    branch = base.get("ref", "")
-    prefix = f"release-please--branches--{branch}"
-    release_ref = candidate.get("ref", "")
-    if not branch or not (release_ref == prefix or
-                          re.fullmatch(re.escape(prefix) + r"--components--[A-Za-z0-9._-]+", release_ref)):
-        return False
+        return None
     # Bind trusted event metadata to the fetched PR merge tree, never a later branch tip.
     parents = git_output(repo, "rev-list", "--parents", "-n", "1", head).decode().split()
-    return len(parents) == 3 and parents[2] == candidate.get("sha")
+    return pr if len(parents) == 3 and parents[2] == candidate.get("sha") else None
+
+
+def release_changelog_allowed(pr):
+    if pr is None:
+        return False
+    branch = pr.get("base", {}).get("ref", "")
+    prefix = f"release-please--branches--{branch}"
+    release_ref = pr.get("head", {}).get("ref", "")
+    return bool(branch and (release_ref == prefix or
+                re.fullmatch(re.escape(prefix) + r"--components--[A-Za-z0-9._-]+", release_ref)))
+
+
+def derived_artifacts_allowed(repo, pr):
+    if pr is None:
+        return False
+    candidate = pr["head"]
+    if not re.fullmatch(r"automation/derived-artifacts-[1-9][0-9]*-[1-9][0-9]*", candidate.get("ref", "")):
+        return False
+    subject = git_output(repo, "show", "-s", "--format=%s", candidate["sha"]).decode().strip()
+    return bool(re.fullmatch(r"chore\(evidence\): regenerate derived artifacts"
+                            r"(?: \([a-z-]+\))? for [0-9a-f]{7,40}", subject))
 
 
 def ownership_findings(repo, base, head):
@@ -221,8 +236,15 @@ def main():
     try:
         policy = load_policy(arguments.repo, arguments.base)
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
-        allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
+        automation_pr = trusted_automation_pr(arguments.repo, arguments.head, arguments.event)
+        allow_changelog = release_changelog_allowed(automation_pr)
+        allow_derived = derived_artifacts_allowed(arguments.repo, automation_pr)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
+        if allow_derived:
+            findings = [finding for finding in findings
+                        if not (trunk_owned(finding[0])
+                                and PurePosixPath(finding[0]).name != "CHANGELOG.md"
+                                and finding[1] == "derived file is owned by trunk/release automation")]
         if allow_changelog:
             findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"
                         or finding[0].startswith(("samples/dist/", "api-report/"))]

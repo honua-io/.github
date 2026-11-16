@@ -166,10 +166,10 @@ class GitDiffTests(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
 
-    def commit(self):
+    def commit(self, message="fixture"):
         self.git("add", ".")
         self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
-                 "commit", "-m", "fixture")
+                 "commit", "-m", message)
         return self.git("rev-parse", "HEAD")
 
     def check(self, head="HEAD", event=None):
@@ -195,17 +195,18 @@ class GitDiffTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
 
-    def release_fixture(self, extra_paths=(), new_paths=()):
-        self.write("CHANGELOG.md", "original\n")
-        self.write("docs/CHANGELOG.md", "original\n")
+    def release_fixture(self, extra_paths=(), new_paths=(),
+                        branch="release-please--branches--main--components--sdk", subject="fixture", contents=None,
+                        changelogs=("CHANGELOG.md", "docs/CHANGELOG.md")):
+        for path in changelogs:
+            self.write(path, "original\n")
         for path in extra_paths:
             self.write(path, "original\n")
         self.base = self.commit()
-        branch = "release-please--branches--main--components--sdk"
         self.git("switch", "-c", branch)
-        for path in ("CHANGELOG.md", "docs/CHANGELOG.md", *extra_paths, *new_paths):
-            self.write(path, "release update\n")
-        candidate = self.commit()
+        for path in (*changelogs, *extra_paths, *new_paths):
+            self.write(path, (contents or {}).get(path, "release update\n"))
+        candidate = self.commit(subject)
         self.git("switch", "main")
         self.write("README.md", "advanced base\n")
         self.base = self.commit()
@@ -277,6 +278,62 @@ class GitDiffTests(unittest.TestCase):
         self.assertNotIn('"docs/CHANGELOG.md":', result.stdout)
         self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',
                       result.stdout)
+
+    def derived_fixture(self, extra_paths=(), new_paths=(), subject=None,
+                        changelogs=("CHANGELOG.md", "docs/CHANGELOG.md")):
+        return self.release_fixture(
+            ("llms-full.txt", "api-report/stable-api.json", "docs/bundle-sizes.md",
+             "samples/dist/capability-sample-matrix.v2.json", *extra_paths), new_paths,
+            branch="automation/derived-artifacts-43832728979-1",
+            subject=subject or "chore(evidence): regenerate derived artifacts (evidence) for abc1234",
+            contents={"docs/state.tf": 'terraform { backend "s3" {} }\n'}, changelogs=changelogs)
+
+    def test_trusted_generated_only_update_passes(self):
+        event = self.derived_fixture(changelogs=())
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_trusted_regeneration_can_update_generated_files_but_not_changelogs(self):
+        event = self.derived_fixture()
+        result = self.check_event(event)
+        self.assertEqual(result.stdout.count("derived file is owned"), 2, result.stdout)
+        self.assertIn('"CHANGELOG.md":', result.stdout)
+        self.assertIn('"docs/CHANGELOG.md":', result.stdout)
+        self.assertNotIn('"llms-full.txt":', result.stdout)
+        self.assertEqual(self.check().stdout.count("derived file is owned"), 6)
+
+    def test_regeneration_rejects_untrusted_events_and_invalid_branch(self):
+        event = self.derived_fixture()
+        changes = [
+            (("pull_request", "user", "id"), 1),
+            (("pull_request", "user", "type"), "User"),
+            (("sender", "id"), 1),
+            (("pull_request", "head", "repo", "full_name"), "fork/example"),
+            (("pull_request", "head", "sha"), self.base),
+            (("pull_request", "head", "ref"), "automation/derived-artifacts-1-1-extra"),
+            (("pull_request", "head", "ref"), "automation/derived-artifacts-0-1"),
+        ]
+        for keys, value in changes:
+            with self.subTest(keys=keys):
+                altered = json.loads(json.dumps(event))
+                target = altered
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+                self.assertEqual(self.check_event(altered).stdout.count("derived file is owned"), 6)
+        self.git("checkout", "--detach", event["pull_request"]["head"]["sha"])
+        self.assertEqual(self.check_event(event).stdout.count("derived file is owned"), 6)
+
+    def test_regeneration_requires_publisher_commit_marker(self):
+        event = self.derived_fixture(subject="ordinary change")
+        self.assertEqual(self.check_event(event).stdout.count("derived file is owned"), 6)
+
+    def test_regeneration_preserves_added_path_and_backend_rules(self):
+        event = self.derived_fixture(new_paths=("docs/archive/new.md", "docs/state.tf"))
+        # The ordinary added-path check applies even with a trusted publisher event.
+        result = self.check_event(event)
+        self.assertIn("historical output belongs", result.stdout)
+        self.assertIn("backend blocks may not change", result.stdout)
 
     def test_terraform_resource_changes_and_backend_formatting_are_allowed(self):
         self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "state" } }\nresource "x" "y" {}\n')

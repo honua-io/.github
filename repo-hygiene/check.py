@@ -7,6 +7,7 @@ import sys
 
 
 POLICY_PATH = ".github/hygiene.json"
+OWNERSHIP_REASON = "derived file is owned by trunk/release automation"
 SCRATCH = re.compile(r"^(?:\.flow|\.?(?:scratch|scratchpad|tmp|temp|wip))(?:$|[-_.])", re.IGNORECASE)
 HISTORY = re.compile(r"^\.?(?:evidence|audits?|archives?|reports?|receipts?|snapshots?|release-evidence)"
                      r"(?:$|[-_.])", re.IGNORECASE)
@@ -88,13 +89,96 @@ def release_changelog_allowed(repo, head, event_path):
     return len(parents) == 3 and parents[2] == candidate.get("sha")
 
 
+
+# Mirrors the SDK producer's publication allowlist. This permits ownership changes
+# only; the trusted-base added-path policy remains independently enforced.
+SDK_DERIVED_FILES = {
+    "README.md", "bench/cross-sdk/corpus.json", "docs/bundle-sizes.md",
+    "docs/comparison.md", "docs/errors.md", "docs/generated/mcp-eval-scorecard.md",
+    "docs/generated/sample-catalog.md", "llms.txt", "llms-full.txt",
+    "samples/catalog.v2.json", "samples/contract/v2/migrations/catalog.v1-to-v2.json",
+    "samples/contract/v2/release-matrix-lanes.v1.json",
+    *(f"samples/contract/v2/consumer-fixtures/honua-site-consumer.v{version}.json"
+      for version in (2, 3, 4)),
+}
+SDK_DERIVED_PREFIXES = (
+    "api-report/", "examples/migration-workbench/public/artifacts/",
+    "examples/migration-workbench/src/generated/",
+    "examples/ai-spatial-app-builder/evidence/",
+    "examples/realtime-incident-dashboard/evidence/",
+    "examples/spatial-analytics-workbench/evidence/", "samples/dist/",
+    "samples/evidence/imagery-cog-quickstart/", "samples/evidence/maplibre-quickstart/",
+    "samples/evidence/migration-workbench/", "samples/evidence/service-explorer/",
+)
+
+
+def sdk_derived_path(path):
+    return (PurePosixPath(path).name != "CHANGELOG.md"
+            and (path in SDK_DERIVED_FILES or path.startswith(SDK_DERIVED_PREFIXES)))
+
+
+def sdk_derived_allowed(arguments):
+    if arguments.event is None:
+        return False
+    event = json.loads(arguments.event.read_text())
+    pr = event.get("pull_request", {})
+    # The write-enabled producer validates the generated bundle before this App
+    # publishes it. A branch name or commit author alone grants no exception.
+    identities = {"honua-io-bot[bot]": 321210756, "github-actions[bot]": 41898282}
+    author = pr.get("user", {})
+    identity = identities.get(author.get("login"))
+    if identity is None or any(user.get("id") != identity or user.get("type") != "Bot"
+                               for user in (author, event.get("sender", {}))):
+        return False
+    repository = "honua-io/honua-sdk-js"
+    source, candidate = pr.get("base", {}), pr.get("head", {})
+    if (event.get("repository", {}).get("full_name") != repository
+            or any(ref.get("repo", {}).get("full_name") != repository for ref in (source, candidate))
+            or source.get("ref") != "trunk"
+            or not re.fullmatch(r"automation/derived-artifacts-[1-9][0-9]*-[1-9][0-9]*",
+                                candidate.get("ref", ""))):
+        return False
+    parents = git_output(arguments.repo, "rev-list", "--parents", "-n", "1", arguments.head).decode().split()
+    base_sha = git_output(arguments.repo, "rev-parse", arguments.base).decode().strip()
+    merge_fields = 3  # Merge SHA plus its two parents.
+    if (len(parents) != merge_fields or parents[1] != base_sha or parents[1] != source.get("sha")
+            or parents[2] != candidate.get("sha")):
+        return False
+    if not sdk_producer_chain(arguments.repo, base_sha, parents[2]):
+        return False
+    paths = git_output(arguments.repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
+                       base_sha, parents[2], "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
+    return bool(paths) and all(sdk_derived_path(path) for path in paths)
+
+
+def sdk_producer_chain(repo, base_sha, candidate_sha):
+    # Five entries suffice to reject a chain beyond the producer's four commits.
+    maximum_commits = 4
+    linear_fields = 2  # Each commit SHA followed by its single parent.
+    chain = git_output(repo, "rev-list", "--parents", f"--max-count={maximum_commits + 1}",
+                       candidate_sha, "^" + base_sha).decode().splitlines()
+    expected = candidate_sha
+    if not 1 <= len(chain) <= maximum_commits:
+        return False
+    for line in chain:
+        commit = line.split()
+        if len(commit) != linear_fields or commit[0] != expected:
+            return False
+        subject = git_output(repo, "show", "-s", "--format=%s", commit[0]).decode().strip()
+        if not re.fullmatch(r"chore\(evidence\): regenerate derived artifacts"
+                            r"(?: \([a-z-]+\))? for [0-9a-f]{7,40}", subject):
+            return False
+        expected = commit[1]
+    return expected == base_sha
+
+
 def ownership_findings(repo, base, head):
     paths = git_output(repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z",
                        base, head, "--").decode("utf-8", errors="surrogateescape").split("\0")[:-1]
     findings = []
     for path in paths:
         if trunk_owned(path):
-            findings.append((path, "derived file is owned by trunk/release automation"))
+            findings.append((path, OWNERSHIP_REASON))
         if path.endswith(".tf"):
             before = backend_blocks(revision_text(repo, base, path))
             after = backend_blocks(revision_text(repo, head, path))
@@ -223,6 +307,9 @@ def main():
         paths = added_paths(arguments.repo, arguments.base, arguments.head)
         allow_changelog = release_changelog_allowed(arguments.repo, arguments.head, arguments.event)
         findings = ownership_findings(arguments.repo, arguments.base, arguments.head)
+        if sdk_derived_allowed(arguments):
+            findings = [finding for finding in findings
+                        if finding[1] != OWNERSHIP_REASON or not sdk_derived_path(finding[0])]
         if allow_changelog:
             findings = [finding for finding in findings if PurePosixPath(finding[0]).name != "CHANGELOG.md"
                         or finding[0].startswith(("samples/dist/", "api-report/"))]

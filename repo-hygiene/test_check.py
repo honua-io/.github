@@ -195,9 +195,11 @@ class GitDiffTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
 
-    def release_fixture(self, extra_paths=(), new_paths=(),
-                        branch="release-please--branches--main--components--sdk", subject="fixture", contents=None,
-                        changelogs=("CHANGELOG.md", "docs/CHANGELOG.md")):
+    def release_fixture(self, extra_paths=(), new_paths=(), **options):
+        branch = options.get("branch", "release-please--branches--main--components--sdk")
+        subject = options.get("subject", "fixture")
+        contents = options.get("contents", {})
+        changelogs = options.get("changelogs", ("CHANGELOG.md", "docs/CHANGELOG.md"))
         for path in changelogs:
             self.write(path, "original\n")
         for path in extra_paths:
@@ -279,14 +281,14 @@ class GitDiffTests(unittest.TestCase):
         self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',
                       result.stdout)
 
-    def derived_fixture(self, extra_paths=(), new_paths=(), subject=None,
-                        changelogs=("CHANGELOG.md", "docs/CHANGELOG.md")):
+    def derived_fixture(self, extra_paths=(), new_paths=(), **options):
         return self.release_fixture(
             ("llms-full.txt", "api-report/stable-api.json", "docs/bundle-sizes.md",
              "samples/dist/capability-sample-matrix.v2.json", *extra_paths), new_paths,
             branch="automation/derived-artifacts-43832728979-1",
-            subject=subject or "chore(evidence): regenerate derived artifacts (evidence) for abc1234",
-            contents={"docs/state.tf": 'terraform { backend "s3" {} }\n'}, changelogs=changelogs)
+            subject=options.get("subject", "chore(evidence): regenerate derived artifacts (evidence) for abc1234"),
+            contents={"docs/state.tf": 'terraform { backend "s3" {} }\n'},
+            changelogs=options.get("changelogs", ("CHANGELOG.md", "docs/CHANGELOG.md")))
 
     def test_trusted_generated_only_update_passes(self):
         event = self.derived_fixture(changelogs=())

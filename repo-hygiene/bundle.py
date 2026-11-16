@@ -15,6 +15,10 @@ MINIMUM_LINES = 300
 PAGE_SIZE = 100
 SEARCH_LIMIT = 1000
 REFERENCE = r"(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*(?![A-Za-z0-9_])"
+ISSUE_URL = re.compile(
+    r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/"
+    r"([1-9][0-9]*)(?![A-Za-z0-9_])", re.IGNORECASE,
+)
 CLOSING = re.compile(
     rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+"
     rf"({REFERENCE}(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+){REFERENCE})*)",
@@ -35,13 +39,14 @@ def prose(body):
     """Exclude quoted examples from policy metadata."""
     text = re.sub(r"<!--.*?-->", "", body or "", flags=re.DOTALL)
     text = re.sub(r"(?ms)^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[^\n]*$|\Z)", "", text)
-    text = re.sub(r"`[^`\n]*`", "", text)
+    text = re.sub(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)", "", text)
     return "\n".join(line for line in text.splitlines() if not line.startswith(("    ", "\t")) and not line.lstrip().startswith(">"))
 
 
 def closed_issues(body, repository):
     references = set()
-    for match in CLOSING.finditer(prose(body)):
+    text = ISSUE_URL.sub(r"\1#\2", prose(body))
+    for match in CLOSING.finditer(text):
         for reference in re.findall(REFERENCE, match.group(1)):
             owner, number = reference.rsplit("#", 1)
             references.add(((owner or repository).lower(), int(number)))

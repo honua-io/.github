@@ -40,6 +40,25 @@ class BundlePolicyTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertFalse(self.passes(self.pr(body)))
 
+    def test_multiline_code_spans_are_examples(self):
+        for delimiter in ("`", "``"):
+            with self.subTest(delimiter=delimiter):
+                body = f"{delimiter}Example:\nCloses #1, #2, #3\n{delimiter}"
+                self.assertFalse(self.passes(self.pr(body)))
+                body = f"{delimiter}Example:\nBundle-exception: trunk-red — example\n{delimiter}"
+                self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
+        self.assertFalse(self.passes(self.pr("``single ` tick\nCloses #1, #2, #3\n``")))
+
+    def test_issue_urls_count_and_deduplicate_with_shorthand(self):
+        body = "Closes https://github.com/honua-io/example/issues/1, #2, honua-io/other#3"
+        self.assertTrue(self.passes(self.pr(body)))
+        body = "Closes https://github.com/honua-io/example/issues/1, #1, #2"
+        self.assertFalse(self.passes(self.pr(body)))
+        body = "\n".join(f"Fixes https://github.com/Honua-io/other/issues/{n}" for n in (1, 2, 3))
+        self.assertTrue(self.passes(self.pr(body)))
+        body = "Closes https://github.com/honua-io/example/issues/1abc, #2, #3"
+        self.assertFalse(self.passes(self.pr(body)))
+
     def test_line_count_boundary(self):
         self.assertFalse(self.passes(self.pr(), 299))
         self.assertTrue(self.passes(self.pr(), 300))

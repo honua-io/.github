@@ -166,10 +166,10 @@ class GitDiffTests(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
 
-    def commit(self, message="fixture"):
+    def commit(self):
         self.git("add", ".")
         self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
-                 "commit", "-m", message)
+                 "commit", "-m", "fixture")
         return self.git("rev-parse", "HEAD")
 
     def check(self, head="HEAD", event=None):
@@ -195,20 +195,172 @@ class GitDiffTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
 
-    def release_fixture(self, extra_paths=(), new_paths=(), **options):
-        branch = options.get("branch", "release-please--branches--main--components--sdk")
-        subject = options.get("subject", "fixture")
-        contents = options.get("contents", {})
-        changelogs = options.get("changelogs", ("CHANGELOG.md", "docs/CHANGELOG.md"))
-        for path in changelogs:
-            self.write(path, "original\n")
+    def derived_fixture(self, subjects=None, extra_paths=(), new_paths=()):
+        paths = ("llms.txt", "llms-full.txt", "docs/bundle-sizes.md",
+                 "api-report/stable-api.json", "samples/dist/app.js", *extra_paths)
+        self.write(RULES.POLICY_PATH, json.dumps({
+            "roots": [".github/", "docs/", "README.md", "llms.txt", "llms-full.txt",
+                      "api-report/", "samples/", "src/"]}))
+        for path in paths:
+            self.write(path, "old\n")
+        self.base = self.commit()
+        self.git("branch", "-m", "trunk")
+        branch = "automation/derived-artifacts-43832728979-1"
+        self.git("switch", "-c", branch)
+        for path in (*paths, *new_paths):
+            self.write(path, "generated\n")
+        self.git("add", ".")
+        for subject in subjects or ["chore(evidence): regenerate derived artifacts for abcdef1234567"]:
+            self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                     "commit", "--allow-empty", "-m", subject)
+        candidate = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        identity = {"login": "honua-io-bot[bot]", "id": 321210756, "type": "Bot"}
+        repository = {"full_name": "honua-io/honua-sdk-js"}
+        return {"repository": repository, "sender": dict(identity), "pull_request": {
+            "user": dict(identity), "base": {"repo": repository, "ref": "trunk", "sha": self.base},
+            "head": {"repo": repository, "ref": branch, "sha": candidate}}}
+
+    def test_generated_bot_bundle_passes_but_ordinary_pr_does_not(self):
+        event = self.derived_fixture()
+        self.assertEqual(self.check_event(event).returncode, 0)
+        self.assertEqual(self.check().returncode, 1)
+        for keys, value in [
+                (("sender", "id"), 1), (("sender", "type"), "User"),
+                (("pull_request", "user", "id"), 1),
+                (("pull_request", "user", "login"), "lookalike[bot]"),
+                (("pull_request", "head", "repo", "full_name"), "fork/honua-sdk-js"),
+                (("pull_request", "base", "repo", "full_name"), "honua-io/other"),
+                (("repository", "full_name"), "honua-io/other"),
+                (("pull_request", "base", "ref"), "other"),
+                (("pull_request", "base", "sha"), "0" * 40),
+                (("pull_request", "head", "sha"), self.base),
+                (("pull_request", "head", "ref"), "automation/derived-artifacts-1-1-extra"),
+                (("pull_request", "head", "ref"), "automation/derived-artifacts-0-1")]:
+            with self.subTest(keys=keys, value=value):
+                altered = json.loads(json.dumps(event))
+                target = altered
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+                self.assertEqual(self.check_event(altered).returncode, 1)
+
+    def test_generated_four_commit_producer_chain_passes(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts (stage) for abcdef1234567" for _ in range(4)])
+        self.assertEqual(self.check_event(event).returncode, 0)
+
+    def test_generated_chain_works_in_the_blob_filtered_bare_checkout(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts for abcdef1234567" for _ in range(4)])
+        self.git("config", "uploadpack.allowFilter", "true")
+        self.git("config", "uploadpack.allowAnySHA1InWant", "true")
+        bare = self.repo / "candidate.git"
+        fetched = subprocess.run(["bash", str(ROOT / "fetch-candidate.sh"), str(bare),
+                                  "file://" + str(self.repo), self.git("rev-parse", "HEAD")],
+                                 capture_output=True, text=True)
+        self.assertEqual(fetched.returncode, 0, fetched.stderr)
+        payload = self.git("rev-parse", "HEAD:llms.txt")
+        event_path = self.repo / "event.json"
+        event_path.write_text(json.dumps(event))
+        result = subprocess.run(["python3", "-I", str(ROOT / "check.py"), "--repo", str(bare),
+                                 "--base", "FETCH_HEAD^1", "--head", "FETCH_HEAD",
+                                 "--event", str(event_path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        missing = subprocess.check_output(["git", "-C", str(bare), "rev-list", "--objects",
+                                           "--missing=print", "FETCH_HEAD"], text=True)
+        self.assertIn("?" + payload, missing.splitlines())
+
+    def test_generated_exception_rejects_a_non_merge_head(self):
+        event = self.derived_fixture()
+        self.git("reset", "--hard", event["pull_request"]["head"]["sha"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_exception_rejects_a_merged_side_branch(self):
+        event = self.derived_fixture()
+        self.git("switch", "-c", "side", self.base)
+        self.write("README.md", "side\n")
+        self.commit()
+        self.git("switch", "automation/derived-artifacts-43832728979-1")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "-m", "chore(evidence): regenerate derived artifacts for abcdef1234567", "side")
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", "automation/derived-artifacts-43832728979-1")
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_five_commit_chain_fails_closed(self):
+        event = self.derived_fixture(subjects=[
+            "chore(evidence): regenerate derived artifacts for abcdef1234567" for _ in range(5)])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_unexpected_subject_fails_closed(self):
+        event = self.derived_fixture(subjects=["human update"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_bundle_with_source_change_gets_no_ownership_exception(self):
+        event = self.derived_fixture(extra_paths=["src/client.ts"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_exception_is_limited_to_the_sdk_repository(self):
+        event = self.derived_fixture()
+        repository = {"full_name": "honua-io/other"}
+        event["repository"] = repository
+        for ref in ("head", "base"):
+            event["pull_request"][ref]["repo"] = repository
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_marker_prefix_alone_is_not_a_producer_commit(self):
+        event = self.derived_fixture(subjects=["chore(evidence): regenerate derived artifacts malicious"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_unknown_owned_output_is_not_allowlisted(self):
+        event = self.derived_fixture(extra_paths=["api-reporting/llms-secret.txt"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_changelog_remains_owned(self):
+        event = self.derived_fixture(extra_paths=["api-report/CHANGELOG.md"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_generated_exception_retains_added_file_policy(self):
+        event = self.derived_fixture(new_paths=["api-report/scratch/leak.md"])
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("scratch belongs", result.stdout)
+
+    def test_generated_exception_retains_backend_guard_on_existing_outputs(self):
+        event = self.derived_fixture(extra_paths=["api-report/state.tf"])
+        branch = event["pull_request"]["head"]["ref"]
+        self.git("switch", branch)
+        self.write("api-report/state.tf", 'terraform { backend "s3" { bucket = "state" } }\n')
+        self.git("add", ".")
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "commit", "--amend", "--no-edit")
+        event["pull_request"]["head"]["sha"] = self.git("rev-parse", "HEAD")
+        self.git("switch", "trunk")
+        self.git("reset", "--hard", self.base)
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("tracked Terraform backend blocks may not change", result.stdout)
+        self.assertNotIn("derived file is owned", result.stdout)
+
+    def release_fixture(self, extra_paths=(), new_paths=()):
+        self.write("CHANGELOG.md", "original\n")
+        self.write("docs/CHANGELOG.md", "original\n")
         for path in extra_paths:
             self.write(path, "original\n")
         self.base = self.commit()
+        branch = "release-please--branches--main--components--sdk"
         self.git("switch", "-c", branch)
-        for path in (*changelogs, *extra_paths, *new_paths):
-            self.write(path, (contents or {}).get(path, "release update\n"))
-        candidate = self.commit(subject)
+        for path in ("CHANGELOG.md", "docs/CHANGELOG.md", *extra_paths, *new_paths):
+            self.write(path, "release update\n")
+        candidate = self.commit()
         self.git("switch", "main")
         self.write("README.md", "advanced base\n")
         self.base = self.commit()
@@ -280,62 +432,6 @@ class GitDiffTests(unittest.TestCase):
         self.assertNotIn('"docs/CHANGELOG.md":', result.stdout)
         self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',
                       result.stdout)
-
-    def derived_fixture(self, extra_paths=(), new_paths=(), **options):
-        return self.release_fixture(
-            ("llms-full.txt", "api-report/stable-api.json", "docs/bundle-sizes.md",
-             "samples/dist/capability-sample-matrix.v2.json", *extra_paths), new_paths,
-            branch="automation/derived-artifacts-43832728979-1",
-            subject=options.get("subject", "chore(evidence): regenerate derived artifacts (evidence) for abc1234"),
-            contents={"docs/state.tf": 'terraform { backend "s3" {} }\n'},
-            changelogs=options.get("changelogs", ("CHANGELOG.md", "docs/CHANGELOG.md")))
-
-    def test_trusted_generated_only_update_passes(self):
-        event = self.derived_fixture(changelogs=())
-        result = self.check_event(event)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_trusted_regeneration_can_update_generated_files_but_not_changelogs(self):
-        event = self.derived_fixture()
-        result = self.check_event(event)
-        self.assertEqual(result.stdout.count("derived file is owned"), 2, result.stdout)
-        self.assertIn('"CHANGELOG.md":', result.stdout)
-        self.assertIn('"docs/CHANGELOG.md":', result.stdout)
-        self.assertNotIn('"llms-full.txt":', result.stdout)
-        self.assertEqual(self.check().stdout.count("derived file is owned"), 6)
-
-    def test_regeneration_rejects_untrusted_events_and_invalid_branch(self):
-        event = self.derived_fixture()
-        changes = [
-            (("pull_request", "user", "id"), 1),
-            (("pull_request", "user", "type"), "User"),
-            (("sender", "id"), 1),
-            (("pull_request", "head", "repo", "full_name"), "fork/example"),
-            (("pull_request", "head", "sha"), self.base),
-            (("pull_request", "head", "ref"), "automation/derived-artifacts-1-1-extra"),
-            (("pull_request", "head", "ref"), "automation/derived-artifacts-0-1"),
-        ]
-        for keys, value in changes:
-            with self.subTest(keys=keys):
-                altered = json.loads(json.dumps(event))
-                target = altered
-                for key in keys[:-1]:
-                    target = target[key]
-                target[keys[-1]] = value
-                self.assertEqual(self.check_event(altered).stdout.count("derived file is owned"), 6)
-        self.git("checkout", "--detach", event["pull_request"]["head"]["sha"])
-        self.assertEqual(self.check_event(event).stdout.count("derived file is owned"), 6)
-
-    def test_regeneration_requires_publisher_commit_marker(self):
-        event = self.derived_fixture(subject="ordinary change")
-        self.assertEqual(self.check_event(event).stdout.count("derived file is owned"), 6)
-
-    def test_regeneration_preserves_added_path_and_backend_rules(self):
-        event = self.derived_fixture(new_paths=("docs/archive/new.md", "docs/state.tf"))
-        # The ordinary added-path check applies even with a trusted publisher event.
-        result = self.check_event(event)
-        self.assertIn("historical output belongs", result.stdout)
-        self.assertIn("backend blocks may not change", result.stdout)
 
     def test_terraform_resource_changes_and_backend_formatting_are_allowed(self):
         self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "state" } }\nresource "x" "y" {}\n')

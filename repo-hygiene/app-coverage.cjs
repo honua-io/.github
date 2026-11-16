@@ -2,6 +2,11 @@
 
 const crypto = require('node:crypto');
 
+const MILLISECONDS_PER_SECOND = 1000;
+const JWT_CLOCK_SKEW_SECONDS = 60;
+const JWT_LIFETIME_SECONDS = 300;
+const REQUEST_TIMEOUT_MILLISECONDS = 30000;
+
 function requireOrganizationCoverage(installation) {
   if (installation.account?.login !== 'honua-io' ||
       installation.account?.type !== 'Organization' ||
@@ -11,17 +16,17 @@ function requireOrganizationCoverage(installation) {
 }
 
 async function checkCoverage() {
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const header = encode({alg: 'RS256', typ: 'JWT'});
-  const payload = encode({iat: now - 60, exp: now + 300, iss: process.env.BOT_APP_ID});
+  const payload = encode({iat: now - JWT_CLOCK_SKEW_SECONDS, exp: now + JWT_LIFETIME_SECONDS, iss: process.env.BOT_APP_ID});
   const unsigned = `${header}.${payload}`;
   const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned),
     process.env.BOT_APP_PRIVATE_KEY).toString('base64url');
   const response = await fetch(`https://api.github.com/app/installations/${process.env.INSTALLATION_ID}`, {
     headers: {Authorization: `Bearer ${unsigned}.${signature}`, Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28'},
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   });
   if (!response.ok) throw new Error('Could not verify reporting installation coverage');
   requireOrganizationCoverage(await response.json());

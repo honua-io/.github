@@ -172,9 +172,10 @@ class GitDiffTests(unittest.TestCase):
                  "commit", "-m", "fixture")
         return self.git("rev-parse", "HEAD")
 
-    def check(self, head="HEAD"):
+    def check(self, head="HEAD", event=None):
         return subprocess.run(["python3", "-I", str(ROOT / "check.py"), "--repo", str(self.repo),
-                               "--base", self.base, "--head", head],
+                               "--base", self.base, "--head", head] +
+                              (["--event", str(event)] if event else []),
                               capture_output=True, text=True)
 
     def test_owned_file_changes_and_deletions_are_rejected(self):
@@ -193,6 +194,89 @@ class GitDiffTests(unittest.TestCase):
             (self.repo / path).unlink()
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
+
+    def release_fixture(self, extra_paths=(), new_paths=()):
+        self.write("CHANGELOG.md", "original\n")
+        self.write("docs/CHANGELOG.md", "original\n")
+        for path in extra_paths:
+            self.write(path, "original\n")
+        self.base = self.commit()
+        branch = "release-please--branches--main--components--sdk"
+        self.git("switch", "-c", branch)
+        for path in ("CHANGELOG.md", "docs/CHANGELOG.md", *extra_paths, *new_paths):
+            self.write(path, "release update\n")
+        candidate = self.commit()
+        self.git("switch", "main")
+        self.write("README.md", "advanced base\n")
+        self.base = self.commit()
+        self.git("-c", "user.name=Mike McDougall", "-c", "user.email=mike@honua.io",
+                 "merge", "--no-ff", "--no-edit", branch)
+        identity = {"login": "honua-io-bot[bot]", "id": 321210756, "type": "Bot"}
+        repository = {"full_name": "honua-io/example"}
+        return {"repository": repository, "sender": dict(identity), "pull_request": {
+            "user": dict(identity), "base": {"repo": repository, "ref": "main"},
+            "head": {"repo": repository, "ref": branch, "sha": candidate}}}
+
+    def check_event(self, event):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            path.write_text(json.dumps(event))
+            return self.check(event=path)
+
+    def test_release_bots_can_update_changelogs_in_the_fetched_merge(self):
+        event = self.release_fixture()
+        for login, user_id in (("honua-io-bot[bot]", 321210756), ("github-actions[bot]", 41898282)):
+            with self.subTest(login=login):
+                identity = {"login": login, "id": user_id, "type": "Bot"}
+                event["sender"] = event["pull_request"]["user"] = identity
+                result = self.check_event(event)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.check().returncode, 1)
+
+    def test_release_exception_rejects_untrusted_or_mismatched_events(self):
+        event = self.release_fixture()
+        changes = [
+            (("pull_request", "user", "login"), "lookalike[bot]"),
+            (("pull_request", "user", "id"), 1),
+            (("pull_request", "user", "type"), "User"),
+            (("sender", "id"), 1),
+            (("sender", "type"), "User"),
+            (("pull_request", "head", "repo", "full_name"), "fork/example"),
+            (("pull_request", "base", "repo", "full_name"), "other/example"),
+            (("repository", "full_name"), "other/example"),
+            (("pull_request", "head", "sha"), self.base),
+            (("pull_request", "head", "ref"), "release-please--branches--other"),
+            (("pull_request", "head", "ref"), "release-please--branches--main-pretend"),
+            (("pull_request", "head", "ref"), "release-please--branches--main--components--"),
+            (("pull_request", "base", "ref"), "other"),
+        ]
+        for keys, value in changes:
+            with self.subTest(keys=keys, value=value):
+                altered = json.loads(json.dumps(event))
+                target = altered
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+                result = self.check_event(altered)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(result.stdout.count("derived file is owned"), 2)
+        for incomplete in ({}, {"pull_request": {}}):
+            self.assertEqual(self.check_event(incomplete).returncode, 1)
+        # A non-merge commit cannot acquire the exemption using copied event metadata.
+        self.git("checkout", "--detach", event["pull_request"]["head"]["sha"])
+        self.assertEqual(self.check_event(event).returncode, 1)
+
+    def test_release_exception_keeps_other_ownership_and_path_checks(self):
+        event = self.release_fixture(("docs/llms-full.txt", "docs/bundle-sizes.md",
+                                      "samples/dist/CHANGELOG.md", "api-report/CHANGELOG.md"),
+                                     ("docs/archive/CHANGELOG.md",))
+        result = self.check_event(event)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.stdout.count("derived file is owned"), 4)
+        self.assertNotIn('"CHANGELOG.md":', result.stdout)
+        self.assertNotIn('"docs/CHANGELOG.md":', result.stdout)
+        self.assertIn('"docs/archive/CHANGELOG.md": historical output belongs under ignored artifacts/',
+                      result.stdout)
 
     def test_terraform_resource_changes_and_backend_formatting_are_allowed(self):
         self.write("docs/state.tf", 'terraform { backend "s3" { bucket = "state" } }\nresource "x" "y" {}\n')

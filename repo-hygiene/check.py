@@ -30,6 +30,12 @@ TF_TOKEN = re.compile(r'//[^\n]*|\#[^\n]*|/\*.*?\*/|<<-?(\w+)\r?\n.*?^\s*\1\s*$|
 
 def trunk_owned(path):
     name = PurePosixPath(path).name
+    # honua-server's docs index is regenerated in the same pull request that
+    # changes a page description. The docs gate rejects a stale docs/llms.txt,
+    # so that one path stays author-maintained. Root and llms-full indexes
+    # stay with release automation.
+    if path == "docs/llms.txt":
+        return False
     return (bool(re.fullmatch(r"llms[^/]*\.txt", name)) or name == "CHANGELOG.md"
             or path.startswith(("samples/dist/", "api-report/"))
             or path == "docs/bundle-sizes.md")

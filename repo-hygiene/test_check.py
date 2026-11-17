@@ -196,6 +196,21 @@ class GitDiffTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().stdout.count("derived file is owned"), len(paths))
 
+    def test_server_docs_index_stays_author_maintained(self):
+        self.write("docs/llms.txt", "original\n")
+        self.write("llms.txt", "original\n")
+        self.base = self.commit()
+        self.write("docs/llms.txt", "regenerated\n")
+        self.commit()
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.write("llms.txt", "modified\n")
+        self.commit()
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('"llms.txt"', result.stdout)
+        self.assertNotIn("docs/llms.txt", result.stdout)
+
     def derived_fixture(self, subjects=None, extra_paths=(), new_paths=()):
         paths = ("llms.txt", "llms-full.txt", "docs/bundle-sizes.md",
                  "api-report/stable-api.json", "samples/dist/app.js", *extra_paths)

@@ -83,6 +83,8 @@ class BundlePolicyTests(unittest.TestCase):
                 self.assertTrue(self.passes(self.pr(body, ["bundle-exception"])))
                 self.assertFalse(self.passes(self.pr(body)))
         for body in ("Bundle-exception: single authorized by main standing rule",
+                     "Bundle-exception: single authorized by main standing rule (21 Nov)",
+                     "Bundle-exception: two-ticket authorized by main standing rule — x",
                      "Bundle-exception: authorized by main standing rule — small patch",
                      "Bundle-exception: single authorized by main — small patch",
                      "single authorized by main standing rule — no label line"):

@@ -26,7 +26,7 @@ CLOSING = re.compile(
 )
 # Main's standing rule (21 Nov 2026) allows one ticket, or two, when no third
 # small ticket exists in the repository; the optional parenthetical dates it.
-STANDING_RULE = (r"(?:single|two-ticket(?:[- ]bundle)?)[ \t]+authorized[ \t]+by[ \t]+main"
+STANDING_RULE = (r"(?:single|two-ticket[ \t]+bundle)[ \t]+authorized[ \t]+by[ \t]+main"
                  r"[ \t]+standing[ \t]+rule(?:[ \t]*\([^()\r\n]*\))?")
 EXCEPTION = re.compile(
     r"^bundle-exception:[ \t]*(?:trunk-red|security[- ]high|blocking[- ]red|"
@@ -37,7 +37,8 @@ LANE = re.compile(r"^lane:\s*(s-[a-z0-9-]+)\s*$", re.IGNORECASE | re.MULTILINE)
 RULE = ("Bundle rule: close at least 3 distinct issues, change at least 300 lines, "
         "or apply bundle-exception with a one-line "
         "'Bundle-exception: trunk-red|security high|blocking red|"
-        "single authorized by main standing rule — reason' in the body. "
+        "single (or two-ticket bundle) authorized by main standing rule — reason' "
+        "in the body. "
         "Bot authors are exempt.")
 
 

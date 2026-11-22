@@ -83,7 +83,11 @@ Lane: s-ci-gate
 Bundle-exception: blocking red — restore the required check blocking the release PR
 ```
 
-Permitted exception categories are `trunk-red`, `security high` and `blocking red`.
+Permitted exception categories are `trunk-red`, `security high`, `blocking red`
+and main's standing rule for a repository with no third small ticket to bundle:
+`single authorized by main standing rule` or `two-ticket bundle authorized by main
+standing rule`, optionally followed by a dated parenthetical such as
+`(21 Nov 15:40 HST)`.
 A label alone, an empty reason or an unrelated category fails. Removing the label
 removes the exception. Callers must include `edited`, `labeled` and `unlabeled`
 events so metadata changes rerun the existing required job.

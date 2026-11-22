@@ -74,6 +74,23 @@ class BundlePolicyTests(unittest.TestCase):
                 self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
         self.assertFalse(self.passes(self.pr(valid)))
 
+    def test_standing_rule_single_and_two_ticket_exceptions(self):
+        for category in ("single authorized by main standing rule",
+                         "single authorized by main standing rule (21 Nov 15:40 HST)",
+                         "two-ticket bundle authorized by main standing rule"):
+            body = f"Bundle-exception: {category} — no third small ticket to bundle"
+            with self.subTest(category=category):
+                self.assertTrue(self.passes(self.pr(body, ["bundle-exception"])))
+                self.assertFalse(self.passes(self.pr(body)))
+        for body in ("Bundle-exception: single authorized by main standing rule",
+                     "Bundle-exception: single authorized by main standing rule (21 Nov)",
+                     "Bundle-exception: two-ticket authorized by main standing rule — x",
+                     "Bundle-exception: authorized by main standing rule — small patch",
+                     "Bundle-exception: single authorized by main — small patch",
+                     "single authorized by main standing rule — no label line"):
+            with self.subTest(body=body):
+                self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
+
     def test_all_bot_authors_are_exempt_but_bot_looking_users_are_not(self):
         for login in ("release-please[bot]", "dependabot[bot]", "automation[bot]"):
             pr = self.pr()

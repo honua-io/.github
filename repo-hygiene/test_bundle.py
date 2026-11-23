@@ -58,13 +58,39 @@ class BundlePolicyTests(unittest.TestCase):
         body = "Closes https://github.com/honua-io/example/issues/1abc, #2, #3"
         self.assertFalse(self.passes(self.pr(body)))
 
-    def test_one_or_two_issues_fail_whatever_the_size(self):
+    def test_missing_size_does_not_allow_one_or_two_issues(self):
         for body in ("", "Closes #1", "Closes #1, #2"):
             with self.subTest(body=body):
                 self.assertFalse(self.passes(self.pr(body)))
 
+    def test_single_issue_uses_trusted_changed_line_boundary(self):
+        for additions, deletions, expected in ((299, 0, False), (300, 0, True),
+                                                (0, 300, True), (150, 150, True)):
+            with self.subTest(additions=additions, deletions=deletions):
+                pr = self.pr("Closes #1")
+                pr.update(additions=additions, deletions=deletions)
+                self.assertEqual(self.passes(pr), expected)
+
+    def test_size_does_not_allow_zero_or_two_closing_references(self):
+        for body in ("", "Closes #1, #2"):
+            pr = self.pr(body)
+            pr.update(additions=1000, deletions=1000)
+            self.assertFalse(self.passes(pr))
+
+    def test_single_issue_size_fails_closed_on_invalid_metadata(self):
+        for value in (None, True, "300", -1, 300.0):
+            for field in ("additions", "deletions"):
+                with self.subTest(field=field, value=value):
+                    pr = self.pr("Closes #1")
+                    pr.update(additions=300, deletions=300)
+                    pr[field] = value
+                    self.assertFalse(self.passes(pr))
+        pr = self.pr("Closes #1", ["bundle-exception"])
+        pr.update(additions=300, deletions=0)
+        self.assertFalse(self.passes(pr))
+
     def test_exception_requires_label_permitted_category_and_reason(self):
-        for category in ("trunk-red", "security-tracker", "main-named", "Main-Named"):
+        for category in ("trunk-red", "security-tracker", "main-named", "Main-Named", "blocking-red"):
             body = f"Lane: s-ci-gate\nBundle-exception: {category} — reason"
             with self.subTest(category=category):
                 self.assertTrue(self.passes(self.pr(body, ["bundle-exception"])))
@@ -77,7 +103,7 @@ class BundlePolicyTests(unittest.TestCase):
                 self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
 
     def test_revoked_categories_no_longer_pass(self):
-        for category in ("blocking red", "blocking-red", "security high",
+        for category in ("blocking red", "security high",
                          "single authorized by main standing rule",
                          "two-ticket bundle authorized by main standing rule (21 Nov 15:40 HST)"):
             body = f"Closes #1\nBundle-exception: {category} — no third ticket"

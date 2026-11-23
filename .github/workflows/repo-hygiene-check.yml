@@ -13,4 +13,4 @@ concurrency:
 
 jobs:
   repo-hygiene:
-    uses: honua-io/.github/.github/workflows/repo-hygiene.yml@ad47af2702c4064695f6a1fd35aac5298b5b65fa # three-ticket bundle rule
+    uses: honua-io/.github/.github/workflows/repo-hygiene.yml@7ad926832af0539b74c2b3e9c1f84b93dc1d5603 # current lane bundle rules

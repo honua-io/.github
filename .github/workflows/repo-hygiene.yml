@@ -56,11 +56,6 @@ jobs:
           --repo "$RUNNER_TEMP/repo-hygiene-candidate.git"
           --base FETCH_HEAD^1 --head FETCH_HEAD --event "$PR_EVENT_PATH"
       - name: Enforce the PR bundle rule
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GIT_ASKPASS: ${{ github.workspace }}/.repo-hygiene-tool/repo-hygiene/git-credentials.sh
-          GIT_TERMINAL_PROMPT: "0"
         run: >-
           python3 -I .repo-hygiene-tool/repo-hygiene/bundle.py check
-          --repo "$RUNNER_TEMP/repo-hygiene-candidate.git"
-          --base FETCH_HEAD^1 --head FETCH_HEAD --event "$GITHUB_EVENT_PATH"
+          --event "$GITHUB_EVENT_PATH"

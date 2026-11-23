@@ -1,4 +1,3 @@
-import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -19,8 +18,8 @@ class BundlePolicyTests(unittest.TestCase):
         return {"body": body, "labels": [{"name": label} for label in labels],
                 "user": {"login": "maintainer", "type": "User"}}
 
-    def passes(self, pr, lines=0):
-        return BUNDLE.decision(pr, "honua-io/example", lines)[0]
+    def passes(self, pr):
+        return BUNDLE.decision(pr, "honua-io/example")[0]
 
     def test_distinct_closing_references_include_lists_and_cross_repo(self):
         bodies = ["Closes #1, #2, #3", "Fixes #1\nResolves #2\nClosed #3",
@@ -59,37 +58,42 @@ class BundlePolicyTests(unittest.TestCase):
         body = "Closes https://github.com/honua-io/example/issues/1abc, #2, #3"
         self.assertFalse(self.passes(self.pr(body)))
 
-    def test_line_count_boundary(self):
-        self.assertFalse(self.passes(self.pr(), 299))
-        self.assertTrue(self.passes(self.pr(), 300))
-
-    def test_exception_requires_label_category_and_reason(self):
-        valid = "Lane: s-ci-gate\nBundle-exception: blocking red — restore required CI"
-        self.assertTrue(self.passes(self.pr(valid, ["bundle-exception"])))
-        for body in ("", "Bundle-exception: ", "Bundle-exception: blocking red",
-                     "Bundle-exception: convenience — small patch",
-                     "Bundle-exception:\nblocking red — repair",
-                     "<!-- Bundle-exception: trunk-red — repair -->"):
+    def test_one_or_two_issues_fail_whatever_the_size(self):
+        for body in ("", "Closes #1", "Closes #1, #2"):
             with self.subTest(body=body):
-                self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
-        self.assertFalse(self.passes(self.pr(valid)))
+                self.assertFalse(self.passes(self.pr(body)))
 
-    def test_standing_rule_single_and_two_ticket_exceptions(self):
-        for category in ("single authorized by main standing rule",
-                         "single authorized by main standing rule (21 Nov 15:40 HST)",
-                         "two-ticket bundle authorized by main standing rule"):
-            body = f"Bundle-exception: {category} — no third small ticket to bundle"
+    def test_exception_requires_label_permitted_category_and_reason(self):
+        for category in ("trunk-red", "security-tracker", "main-named", "Main-Named"):
+            body = f"Lane: s-ci-gate\nBundle-exception: {category} — reason"
             with self.subTest(category=category):
                 self.assertTrue(self.passes(self.pr(body, ["bundle-exception"])))
                 self.assertFalse(self.passes(self.pr(body)))
-        for body in ("Bundle-exception: single authorized by main standing rule",
-                     "Bundle-exception: single authorized by main standing rule (21 Nov)",
-                     "Bundle-exception: two-ticket authorized by main standing rule — x",
-                     "Bundle-exception: authorized by main standing rule — small patch",
-                     "Bundle-exception: single authorized by main — small patch",
-                     "single authorized by main standing rule — no label line"):
+        for body in ("", "Bundle-exception: ", "Bundle-exception: trunk-red",
+                     "Bundle-exception: convenience — small patch",
+                     "Bundle-exception:\ntrunk-red — repair",
+                     "<!-- Bundle-exception: trunk-red — repair -->"):
             with self.subTest(body=body):
                 self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
+
+    def test_revoked_categories_no_longer_pass(self):
+        for category in ("blocking red", "blocking-red", "security high",
+                         "single authorized by main standing rule",
+                         "two-ticket bundle authorized by main standing rule (21 Nov 15:40 HST)"):
+            body = f"Closes #1\nBundle-exception: {category} — no third ticket"
+            with self.subTest(category=category):
+                self.assertFalse(self.passes(self.pr(body, ["bundle-exception"])))
+
+    def test_label_without_permitted_reason_fails_even_with_three_issues(self):
+        bundled = "Closes #1, #2, #3"
+        self.assertTrue(self.passes(self.pr(bundled)))
+        self.assertFalse(self.passes(self.pr(bundled, ["bundle-exception"])))
+        self.assertFalse(self.passes(self.pr(
+            bundled + "\nBundle-exception: blocking red — x", ["bundle-exception"])))
+        self.assertTrue(self.passes(self.pr(
+            bundled + "\nBundle-exception: main-named — x", ["bundle-exception"])))
+        passed, reason = BUNDLE.decision(self.pr(bundled, ["bundle-exception"]), "honua-io/example")
+        self.assertIn("without a permitted reason", reason)
 
     def test_all_bot_authors_are_exempt_but_bot_looking_users_are_not(self):
         for login in ("release-please[bot]", "dependabot[bot]", "automation[bot]"):
@@ -100,10 +104,10 @@ class BundlePolicyTests(unittest.TestCase):
             self.assertFalse(self.passes(pr))
 
     def test_failure_names_the_rule(self):
-        passed, reason = BUNDLE.decision(self.pr(), "honua-io/example", 1)
+        passed, reason = BUNDLE.decision(self.pr(), "honua-io/example")
         self.assertFalse(passed)
         self.assertIn("Bundle rule:", reason)
-        self.assertIn("300", reason)
+        self.assertIn("trunk-red|security-tracker|main-named", reason)
 
     def test_summary_counts_lanes_and_reports_unattributed_and_invalid(self):
         items = [self.pr("Lane: s-ci-gate\nBundle-exception: trunk-red — repair",
@@ -129,56 +133,17 @@ class BundlePolicyTests(unittest.TestCase):
                         BUNDLE.weekly_exceptions("2026-11-09")
 
 
-class BundleGitTests(unittest.TestCase):
+class BundleCliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
-        self.git("init", "-q")
-        self.git("config", "user.name", "Test")
-        self.git("config", "user.email", "test@example.com")
-        self.git("commit", "--allow-empty", "-qm", "base")
-        self.base = self.git("rev-parse", "HEAD")
-
-    def git(self, *args):
-        return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True).strip()
-
-    def test_numstat_counts_additions_deletions_and_binary_without_path_confusion(self):
-        (self.repo / "old.txt").write_text("old\n" * 150)
-        self.git("add", ".")
-        self.git("commit", "-qm", "before")
-        base = self.git("rev-parse", "HEAD")
-        (self.repo / "old.txt").unlink()
-        (self.repo / "new\tfile\n.txt").write_text("new\n" * 150)
-        (self.repo / "binary").write_bytes(b"\0binary")
-        self.git("add", ".")
-        self.git("commit", "-qm", "candidate")
-        args = argparse.Namespace(repo=self.repo, base=base, head="HEAD")
-        self.assertEqual(BUNDLE.line_count(args), 300)
-
-    def test_unchanged_and_modified_renames_count_only_changed_lines(self):
-        old = self.repo / "old\tfile\n.txt"
-        old.write_text("same\n" * 150)
-        self.git("add", ".")
-        self.git("commit", "-qm", "before")
-        base = self.git("rev-parse", "HEAD")
-        renamed = self.repo / "new\tfile\n.txt"
-        old.rename(renamed)
-        self.git("add", ".")
-        self.git("commit", "-qm", "rename")
-        args = argparse.Namespace(repo=self.repo, base=base, head="HEAD")
-        self.assertEqual(BUNDLE.line_count(args), 0)
-        renamed.write_text(renamed.read_text() + "changed\n")
-        self.git("add", ".")
-        self.git("commit", "-qm", "edit")
-        self.assertEqual(BUNDLE.line_count(args), 1)
 
     def test_cli_fails_closed_with_missing_event(self):
         event = self.repo / "event.json"
         event.write_text(json.dumps({"repository": {"full_name": "honua-io/example"},
                                     "pull_request": {"body": "", "user": {"type": "User"}}}))
-        command = ["python3", "-I", str(ROOT / "bundle.py"), "check", "--repo", str(self.repo),
-                   "--base", self.base, "--head", "HEAD", "--event", str(event)]
+        command = ["python3", "-I", str(ROOT / "bundle.py"), "check", "--event", str(event)]
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("Bundle rule:", result.stdout)
@@ -193,7 +158,7 @@ class WorkflowContractTests(unittest.TestCase):
         workflow = (ROOT.parent / ".github/workflows/repo-hygiene.yml").read_text()
         self.assertEqual(workflow.count("    name: Repository hygiene"), 1)
         self.assertIn("repo-hygiene/bundle.py check", workflow)
-        self.assertIn('--base FETCH_HEAD^1 --head FETCH_HEAD --event "$GITHUB_EVENT_PATH"', workflow)
+        self.assertIn('bundle.py check\n          --event "$GITHUB_EVENT_PATH"', workflow)
         self.assertNotIn("continue-on-error", workflow)
 
     def test_weekly_summary_has_read_only_app_access(self):

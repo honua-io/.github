@@ -61,10 +61,12 @@ job, write permission or PR code execution is needed.
 
 ## PR bundle policy
 
-The existing `repo-hygiene / Repository hygiene` job also checks PR size and purpose.
-A human-authored PR passes when its body closes at least three distinct issues, or
-its fetched merge diff adds and deletes at least 300 lines in total, or it has the
-`bundle-exception` label and a one-line reason in its body. Bot authors (GitHub
+The existing `repo-hygiene / Repository hygiene` job also checks PR purpose
+(founder ruling, 22 Nov 2026: every PR closes at least three tickets).
+A human-authored PR passes when its body closes at least three distinct issues,
+or it has the `bundle-exception` label and a one-line permitted reason in its
+body. Size is not an exception. The label without a permitted reason fails the
+PR even when it closes three issues. Bot authors (GitHub
 account type `Bot`, including Release Please and Dependabot) bypass only this
 bundle rule; all path and ownership checks still apply.
 
@@ -73,21 +75,21 @@ local or cross-repository references, and comma-separated lists. For example,
 `Closes #12, #13, honua-io/other#14` counts three distinct issues. Repeating a
 reference does not count again; comments, code examples and blockquotes do not
 count. The checker does not judge whether the issues are related: reviewers own
-that decision. Binary files and unchanged renames contribute zero lines. The line count comes from the
-fetched Git trees; candidate code is never executed.
+that decision. It reads only the event's PR metadata; candidate code is never
+executed.
 
 Use this body metadata for a permitted exception and lane accounting:
 
 ```text
 Lane: s-ci-gate
-Bundle-exception: blocking red — restore the required check blocking the release PR
+Bundle-exception: trunk-red — restore the required check that turned trunk red
 ```
 
-Permitted exception categories are `trunk-red`, `security high`, `blocking red`
-and main's standing rule for a repository with no third small ticket to bundle:
-`single authorized by main standing rule` or `two-ticket bundle authorized by main
-standing rule`, optionally followed by a dated parenthetical such as
-`(21 Nov 15:40 HST)`.
+The only permitted categories are `trunk-red` (a fix for red trunk),
+`security-tracker` (a fix for a private security-tracker finding) and
+`main-named` (a change main names explicitly in the lane's inbox; say which
+entry in the reason). The earlier `security high`, `blocking red` and
+standing-rule single or two-ticket categories are revoked.
 A label alone, an empty reason or an unrelated category fails. Removing the label
 removes the exception. Callers must include `edited`, `labeled` and `unlabeled`
 events so metadata changes rerun the existing required job.

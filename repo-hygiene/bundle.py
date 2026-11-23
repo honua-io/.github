@@ -11,7 +11,6 @@ import sys
 
 
 MINIMUM_ISSUES = 3
-MINIMUM_LINES = 300
 PAGE_SIZE = 100
 SEARCH_LIMIT = 1000
 REFERENCE = r"(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*(?![A-Za-z0-9_])"
@@ -24,21 +23,17 @@ CLOSING = re.compile(
     rf"({REFERENCE}(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+){REFERENCE})*)",
     re.IGNORECASE,
 )
-# Main's standing rule (21 Nov 2026) allows one ticket, or two, when no third
-# small ticket exists in the repository; the optional parenthetical dates it.
-STANDING_RULE = (r"(?:single|two-ticket[ \t]+bundle)[ \t]+authorized[ \t]+by[ \t]+main"
-                 r"[ \t]+standing[ \t]+rule(?:[ \t]*\([^()\r\n]*\))?")
+# Founder ruling (22 Nov 2026): every PR closes at least three issues. The only
+# exceptions are a trunk-red fix, a private security-tracker finding, or a change
+# main names explicitly in the lane's inbox.
 EXCEPTION = re.compile(
-    r"^bundle-exception:[ \t]*(?:trunk-red|security[- ]high|blocking[- ]red|"
-    rf"{STANDING_RULE})"
+    r"^bundle-exception:[ \t]*(?:trunk-red|security-tracker|main-named)"
     r"[ \t]*(?:[:—–]| - )[ \t]*\S[^\r\n]*$", re.IGNORECASE | re.MULTILINE,
 )
 LANE = re.compile(r"^lane:\s*(s-[a-z0-9-]+)\s*$", re.IGNORECASE | re.MULTILINE)
-RULE = ("Bundle rule: close at least 3 distinct issues, change at least 300 lines, "
-        "or apply bundle-exception with a one-line "
-        "'Bundle-exception: trunk-red|security high|blocking red|"
-        "single (or two-ticket bundle) authorized by main standing rule — reason' "
-        "in the body. "
+RULE = ("Bundle rule: close at least 3 distinct issues, or apply bundle-exception with "
+        "a one-line 'Bundle-exception: trunk-red|security-tracker|main-named — reason' "
+        "in the body. The label without one of those reasons always fails. "
         "Bot authors are exempt.")
 
 
@@ -60,50 +55,32 @@ def closed_issues(body, repository):
     return references
 
 
+def labelled(pr):
+    return "bundle-exception" in {label["name"] for label in pr.get("labels", [])}
+
+
 def has_exception(pr):
-    labels = {label["name"] for label in pr.get("labels", [])}
-    return "bundle-exception" in labels and bool(EXCEPTION.search(prose(pr.get("body"))))
+    return labelled(pr) and bool(EXCEPTION.search(prose(pr.get("body"))))
 
 
-def decision(pr, repository, changed_lines):
+def decision(pr, repository):
     if pr.get("user", {}).get("type") == "Bot":
         return True, "bot author"
+    if labelled(pr) and not has_exception(pr):
+        return False, f"bundle-exception label without a permitted reason. {RULE}"
     issues = len(closed_issues(pr.get("body"), repository))
     if issues >= MINIMUM_ISSUES:
         return True, f"{issues} distinct closing references"
-    if changed_lines >= MINIMUM_LINES:
-        return True, f"{changed_lines} changed lines"
     if has_exception(pr):
         return True, "documented bundle-exception"
-    return False, f"{issues} distinct closing references; {changed_lines} changed lines. {RULE}"
-
-
-def line_count(arguments):
-    result = subprocess.run(
-        ["git", "-C", str(arguments.repo), "diff", "--no-ext-diff", "--find-renames",
-         "--numstat", "-z", arguments.base, arguments.head, "--"],
-        check=True, capture_output=True,
-    )
-    # Binary changes have no line count. Count the exact fetched merge tree,
-    # rather than trusting candidate-supplied metadata or checking out its code.
-    records = iter(result.stdout.split(b"\0"))
-    total = 0
-    for record in records:
-        if not record:
-            continue
-        added, deleted, path = record.split(b"\t", 2)
-        if not path:
-            next(records)  # NUL-delimited old and new paths for a rename.
-            next(records)
-        total += sum(int(count) for count in (added, deleted) if count != b"-")
-    return total
+    return False, f"{issues} distinct closing references. {RULE}"
 
 
 def check(arguments):
     event = json.loads(arguments.event.read_text())
     pr = event["pull_request"]
     repository = event["repository"]["full_name"]
-    passed, reason = decision(pr, repository, line_count(arguments))
+    passed, reason = decision(pr, repository)
     print(f"Bundle policy: {'PASS' if passed else 'FAIL'} — {reason}")
     return int(not passed)
 
@@ -160,9 +137,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     policy = commands.add_parser("check")
-    policy.add_argument("--repo", type=Path, required=True)
-    policy.add_argument("--base", required=True)
-    policy.add_argument("--head", required=True)
     policy.add_argument("--event", type=Path, required=True)
     report = commands.add_parser("summary")
     report.add_argument("--since", help="First UTC merge date (YYYY-MM-DD); defaults to seven days ago.")

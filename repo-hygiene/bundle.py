@@ -11,6 +11,7 @@ import sys
 
 
 MINIMUM_ISSUES = 3
+MINIMUM_SINGLE_ISSUE_LINES = 300
 PAGE_SIZE = 100
 SEARCH_LIMIT = 1000
 REFERENCE = r"(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*(?![A-Za-z0-9_])"
@@ -23,11 +24,10 @@ CLOSING = re.compile(
     rf"({REFERENCE}(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+){REFERENCE})*)",
     re.IGNORECASE,
 )
-# Every PR closes at least three issues. The only exceptions are a trunk-red fix,
-# a private security-tracker finding, or a change main names explicitly in the
-# lane's inbox.
+# Single-ticket changes of at least 300 lines and documented red-check repairs
+# follow the current lane rules alongside ordinary three-ticket bundles.
 EXCEPTION = re.compile(
-    r"^bundle-exception:[ \t]*(?:trunk-red|security-tracker|main-named)"
+    r"^bundle-exception:[ \t]*(?:trunk-red|security-tracker|main-named|blocking-red)"
     r"[ \t]*(?:[:—–]| - )[ \t]*\S[^\r\n]*$", re.IGNORECASE | re.MULTILINE,
 )
 # Automated publishers (generated-file regeneration, re-pins, dependency bots,
@@ -36,8 +36,8 @@ EXCEPTION = re.compile(
 # prefixes, and only when the head branch lives in the base repository.
 PUBLISHER_BRANCHES = ("automation/", "dependabot/", "renovate/", "release-please--")
 LANE = re.compile(r"^lane:\s*(s-[a-z0-9-]+)\s*$", re.IGNORECASE | re.MULTILINE)
-RULE = ("Bundle rule: close at least 3 distinct issues, or apply bundle-exception with "
-        "a one-line 'Bundle-exception: trunk-red|security-tracker|main-named — reason' "
+RULE = ("Bundle rule: close at least 3 distinct issues, close one issue with at least 300 changed lines, or apply bundle-exception with "
+        "a one-line 'Bundle-exception: trunk-red|security-tracker|main-named|blocking-red — reason' "
         "in the body. The label without one of those reasons always fails. "
         "Bot authors and same-repository publisher branches "
         f"({', '.join(PUBLISHER_BRANCHES)}) are exempt.")
@@ -85,6 +85,11 @@ def decision(pr, repository):
     issues = len(closed_issues(pr.get("body"), repository))
     if issues >= MINIMUM_ISSUES:
         return True, f"{issues} distinct closing references"
+    counts = (pr.get("additions"), pr.get("deletions"))
+    if issues == 1 and all(type(count) is int and count >= 0 for count in counts):
+        changed_lines = sum(counts)
+        if changed_lines >= MINIMUM_SINGLE_ISSUE_LINES:
+            return True, f"one closing reference and {changed_lines} changed lines"
     if has_exception(pr):
         return True, "documented bundle-exception"
     return False, f"{issues} distinct closing references. {RULE}"

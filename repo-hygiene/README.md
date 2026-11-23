@@ -62,10 +62,11 @@ job, write permission or PR code execution is needed.
 ## PR bundle policy
 
 The existing `repo-hygiene / Repository hygiene` job also checks PR purpose
-(founder ruling, 22 Nov 2026: every PR closes at least three tickets).
+using the current lane rules in `handoffs/grok-eval5/LANE-RULES.md`.
 A human-authored PR passes when its body closes at least three distinct issues,
+closes exactly one issue with at least 300 additions plus deletions,
 or it has the `bundle-exception` label and a one-line permitted reason in its
-body. Size is not an exception. The label without a permitted reason fails the
+body. Size comes from trusted PR event metadata; missing or invalid counts fail closed. The label without a permitted reason fails the
 PR even when it closes three issues. Bot authors (GitHub
 account type `Bot`, including Release Please and Dependabot) bypass only this
 bundle rule; all path and ownership checks still apply. Automated publisher PRs
@@ -92,8 +93,9 @@ Bundle-exception: trunk-red — restore the required check that turned trunk red
 The only permitted categories are `trunk-red` (a fix for red trunk),
 `security-tracker` (a fix for a private security-tracker finding) and
 `main-named` (a change main names explicitly in the lane's inbox; say which
-entry in the reason). The earlier `security high`, `blocking red` and
-standing-rule single or two-ticket categories are revoked.
+entry in the reason), and `blocking-red` (a repair for a failed check blocking
+another PR; name that PR and check in the reason). The earlier `security high`,
+`blocking red` and standing-rule two-ticket categories remain invalid.
 A label alone, an empty reason or an unrelated category fails. Removing the label
 removes the exception. Callers must include `edited`, `labeled` and `unlabeled`
 events so metadata changes rerun the existing required job.

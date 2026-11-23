@@ -30,11 +30,17 @@ EXCEPTION = re.compile(
     r"^bundle-exception:[ \t]*(?:trunk-red|security-tracker|main-named)"
     r"[ \t]*(?:[:—–]| - )[ \t]*\S[^\r\n]*$", re.IGNORECASE | re.MULTILINE,
 )
+# Automated publishers (generated-file regeneration, re-pins, dependency bots,
+# Release Please) open PRs that close no ticket. Bot accounts are exempt by type;
+# a publisher that opens PRs with a user token is recognized by these branch
+# prefixes, and only when the head branch lives in the base repository.
+PUBLISHER_BRANCHES = ("automation/", "dependabot/", "renovate/", "release-please--")
 LANE = re.compile(r"^lane:\s*(s-[a-z0-9-]+)\s*$", re.IGNORECASE | re.MULTILINE)
 RULE = ("Bundle rule: close at least 3 distinct issues, or apply bundle-exception with "
         "a one-line 'Bundle-exception: trunk-red|security-tracker|main-named — reason' "
         "in the body. The label without one of those reasons always fails. "
-        "Bot authors are exempt.")
+        "Bot authors and same-repository publisher branches "
+        f"({', '.join(PUBLISHER_BRANCHES)}) are exempt.")
 
 
 def prose(body):
@@ -63,9 +69,17 @@ def has_exception(pr):
     return labelled(pr) and bool(EXCEPTION.search(prose(pr.get("body"))))
 
 
+def publisher_branch(pr, repository):
+    head = pr.get("head") or {}
+    same_repository = ((head.get("repo") or {}).get("full_name") or "").lower() == repository.lower()
+    return same_repository and str(head.get("ref") or "").startswith(PUBLISHER_BRANCHES)
+
+
 def decision(pr, repository):
     if pr.get("user", {}).get("type") == "Bot":
         return True, "bot author"
+    if publisher_branch(pr, repository):
+        return True, f"publisher branch {pr['head']['ref']}"
     if labelled(pr) and not has_exception(pr):
         return False, f"bundle-exception label without a permitted reason. {RULE}"
     issues = len(closed_issues(pr.get("body"), repository))

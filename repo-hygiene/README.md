@@ -68,7 +68,11 @@ or it has the `bundle-exception` label and a one-line permitted reason in its
 body. Size is not an exception. The label without a permitted reason fails the
 PR even when it closes three issues. Bot authors (GitHub
 account type `Bot`, including Release Please and Dependabot) bypass only this
-bundle rule; all path and ownership checks still apply.
+bundle rule; all path and ownership checks still apply. Automated publisher PRs
+opened with a user token are exempt the same way when the head branch is in the
+base repository and starts with `automation/`, `dependabot/`, `renovate/` or
+`release-please--` (main ruling on honua-server#9466); lane-authored PRs must
+not use those prefixes, and the lane `gh` gate refuses them.
 
 Closing references accept `Closes`, `Fixes`, `Resolves` and their verb variants,
 local or cross-repository references, and comma-separated lists. For example,

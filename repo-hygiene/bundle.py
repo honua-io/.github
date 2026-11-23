@@ -23,9 +23,9 @@ CLOSING = re.compile(
     rf"({REFERENCE}(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+){REFERENCE})*)",
     re.IGNORECASE,
 )
-# Founder ruling (22 Nov 2026): every PR closes at least three issues. The only
-# exceptions are a trunk-red fix, a private security-tracker finding, or a change
-# main names explicitly in the lane's inbox.
+# Every PR closes at least three issues. The only exceptions are a trunk-red fix,
+# a private security-tracker finding, or a change main names explicitly in the
+# lane's inbox.
 EXCEPTION = re.compile(
     r"^bundle-exception:[ \t]*(?:trunk-red|security-tracker|main-named)"
     r"[ \t]*(?:[:—–]| - )[ \t]*\S[^\r\n]*$", re.IGNORECASE | re.MULTILINE,

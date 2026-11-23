@@ -106,6 +106,8 @@ the job log and Actions summary. PRs without lane metadata are explicitly
 unattributed. The report covers the past seven UTC calendar days and fails on
 incomplete or over-limit search results. Counts reflect labels and bodies at
 report time; removing a label after merge removes that PR from this report.
+"Missing valid reason" applies the current categories, so a PR merged before
+the 22 Nov 2026 ruling under a revoked category is counted there.
 The workflow verifies via an authenticated read-only App API request that the
 installation belongs to honua-io, is active, and covers all repositories before
 running organization search. A selected-repository installation fails instead of

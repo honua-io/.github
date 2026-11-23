@@ -103,6 +103,28 @@ class BundlePolicyTests(unittest.TestCase):
             pr["user"]["type"] = "User"
             self.assertFalse(self.passes(pr))
 
+    def test_same_repository_publisher_branches_are_exempt(self):
+        for ref in ("automation/regenerate-generated-files", "automation/derived-artifacts-1-1",
+                    "dependabot/nuget/x-1.0", "renovate/all", "release-please--branches--trunk"):
+            with self.subTest(ref=ref):
+                pr = self.pr("", ["bundle-exception"])
+                pr["head"] = {"ref": ref, "repo": {"full_name": "Honua-IO/Example"}}
+                passed, reason = BUNDLE.decision(pr, "honua-io/example")
+                self.assertTrue(passed)
+                self.assertIn("publisher branch", reason)
+
+    def test_publisher_prefix_needs_same_repository_and_exact_prefix(self):
+        cases = [("automation/regenerate-generated-files", "someone/example"),
+                 ("automation/regenerate-generated-files", None),
+                 ("fix/automation/regenerate", "honua-io/example"),
+                 ("automation", "honua-io/example"),
+                 ("release-please-x", "honua-io/example")]
+        for ref, owner in cases:
+            with self.subTest(ref=ref, owner=owner):
+                pr = self.pr("Closes #1")
+                pr["head"] = {"ref": ref, "repo": {"full_name": owner} if owner else None}
+                self.assertFalse(self.passes(pr))
+
     def test_failure_names_the_rule(self):
         passed, reason = BUNDLE.decision(self.pr(), "honua-io/example")
         self.assertFalse(passed)
